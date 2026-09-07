@@ -22,7 +22,7 @@ from collections import Counter
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
-from app import config, extraction, normalization, sectioning, store
+from app import comparison, config, extraction, normalization, sectioning, store
 from app.llm.gemini_client import GeminiClient
 from app.pdf_ingest import PDFParseError, parse_pdf
 
@@ -176,6 +176,10 @@ async def upload_document(
         )
         fact_ids.append(fact_id)
 
+    new_facts = [store.get_fact(fact_id) for fact_id in fact_ids]
+    new_facts = [f for f in new_facts if f is not None]
+    relationships = await comparison.compare_new_document_facts(new_facts, llm_client)
+
     return {
         "document_id": document_id,
         "filename": file.filename,
@@ -183,4 +187,5 @@ async def upload_document(
         "facts_extracted": len(located_facts),
         "fact_ids": fact_ids,
         "entity_name": entity_name,
+        "relationships_found": len(relationships),
     }
