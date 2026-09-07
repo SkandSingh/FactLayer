@@ -1,0 +1,337 @@
+/* FactLayer UI stylesheet — plain CSS, no build step, no external fonts/CDNs. */
+
+:root {
+  --bg: #f7f7f5;
+  --surface: #ffffff;
+  --border: #e2e2df;
+  --text: #1f2320;
+  --text-muted: #6b6f6a;
+  --accent: #2f5d50;
+  --accent-soft: #e7f0ec;
+  --link: #1f5b8f;
+
+  --corroborates-bg: #e4f5e9;
+  --corroborates-fg: #1c6b39;
+  --corroborates-border: #a9dfba;
+
+  --contradicts-bg: #fbe7e6;
+  --contradicts-fg: #a3352c;
+  --contradicts-border: #f0b7b2;
+
+  --reconciled-bg: #fdf1d8;
+  --reconciled-fg: #916a12;
+  --reconciled-border: #f0d79b;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  color: var(--text);
+  background: var(--bg);
+  line-height: 1.5;
+}
+
+.page {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+
+header.site-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 2px solid var(--accent);
+}
+
+header.site-header .brand {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--accent);
+  text-decoration: none;
+  letter-spacing: -0.01em;
+}
+
+header.site-header .tagline {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+h1 {
+  font-size: 1.6rem;
+  margin: 0 0 0.75rem;
+}
+
+h2 {
+  font-size: 1.15rem;
+  margin: 2rem 0 0.75rem;
+  color: var(--accent);
+}
+
+h3 {
+  font-size: 1rem;
+  margin: 1.25rem 0 0.5rem;
+}
+
+a {
+  color: var(--link);
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+thead th {
+  text-align: left;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  background: var(--accent-soft);
+  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+tbody td {
+  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr:hover {
+  background: #fafaf8;
+}
+
+.empty-state {
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 1rem 0;
+}
+
+/* Evidence block: verbatim quote grounding a fact */
+blockquote.evidence-quote {
+  margin: 0.75rem 0;
+  padding: 0.9rem 1.1rem;
+  background: var(--accent-soft);
+  border-left: 4px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  font-size: 1.05rem;
+  font-style: italic;
+  color: var(--text);
+}
+
+.evidence-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.25rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-top: 0.4rem;
+}
+
+.evidence-meta span strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Field grid for fact/relationship detail */
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem 1.5rem;
+  margin: 1rem 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.field .label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.field .value {
+  font-size: 1rem;
+}
+
+.field .value.mono {
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+}
+
+/* Relationship type badges */
+.badge {
+  display: inline-block;
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.badge-corroborates {
+  background: var(--corroborates-bg);
+  color: var(--corroborates-fg);
+  border-color: var(--corroborates-border);
+}
+
+.badge-contradicts {
+  background: var(--contradicts-bg);
+  color: var(--contradicts-fg);
+  border-color: var(--contradicts-border);
+}
+
+.badge-reconciled_context {
+  background: var(--reconciled-bg);
+  color: var(--reconciled-fg);
+  border-color: var(--reconciled-border);
+}
+
+.confidence {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* Relationship list on fact detail */
+.relationship-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+  background: var(--surface);
+}
+
+.relationship-item .rel-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.reasoning-text {
+  color: var(--text);
+}
+
+/* Side-by-side comparison for relationship detail */
+.comparison {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  align-items: stretch;
+}
+
+@media (max-width: 760px) {
+  .comparison {
+    grid-template-columns: 1fr;
+  }
+}
+
+.comparison .fact-column {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.25rem 1.5rem;
+}
+
+.comparison .fact-column h3 {
+  margin-top: 0;
+}
+
+.relationship-summary {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+.relationship-summary .badge {
+  font-size: 0.95rem;
+  padding: 0.3rem 0.9rem;
+  margin-bottom: 0.6rem;
+}
+
+.relationship-summary .reasoning-text {
+  max-width: 640px;
+  margin: 0.5rem auto 0;
+}
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.doc-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.doc-list li {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+
+.doc-list .doc-filename {
+  font-weight: 600;
+  display: block;
+}
+
+.doc-list .doc-meta {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+footer.site-footer {
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}

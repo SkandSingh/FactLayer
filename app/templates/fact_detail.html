@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FactLayer — {{ fact.entity_name }} / {{ fact.attribute }}</title>
+  <link rel="stylesheet" href="{{ request.url_for('static', path='style.css') }}">
+</head>
+<body>
+  <div class="page">
+    <header class="site-header">
+      <a class="brand" href="/ui/">FactLayer</a>
+      <span class="tagline">Fact detail</span>
+    </header>
+
+    <a class="back-link" href="/ui/">&larr; back to all facts</a>
+
+    <h1>{{ fact.entity_name }} &mdash; {{ fact.attribute }}</h1>
+
+    <div class="card">
+      <div class="field-grid">
+        <div class="field">
+          <span class="label">Raw value</span>
+          <span class="value">{{ fact.raw_value }}{% if fact.unit %} {{ fact.unit }}{% endif %}</span>
+        </div>
+        <div class="field">
+          <span class="label">Normalized value</span>
+          <span class="value">
+            {% if fact.normalized_value is not none %}
+              {{ fact.normalized_value }}{% if fact.normalized_unit %} {{ fact.normalized_unit }}{% endif %}
+            {% else %}
+              <span class="muted">&mdash;</span>
+            {% endif %}
+          </span>
+        </div>
+        <div class="field">
+          <span class="label">Entity scope</span>
+          <span class="value">{{ fact.entity_scope or "—" }}</span>
+        </div>
+        <div class="field">
+          <span class="label">Entity id</span>
+          <span class="value mono">{{ fact.entity_id or "—" }}</span>
+        </div>
+        <div class="field">
+          <span class="label">Confidence</span>
+          <span class="value confidence">{{ "%.2f"|format(fact.confidence) }}</span>
+        </div>
+        <div class="field">
+          <span class="label">Document id</span>
+          <span class="value">{{ fact.document_id }}</span>
+        </div>
+      </div>
+
+      <h3>Time scope</h3>
+      <div class="field-grid">
+        <div class="field">
+          <span class="label">Period type</span>
+          <span class="value">{{ fact.time_scope.period_type }}</span>
+        </div>
+        <div class="field">
+          <span class="label">Label</span>
+          <span class="value">{{ fact.time_scope.label or "—" }}</span>
+        </div>
+        <div class="field">
+          <span class="label">Start</span>
+          <span class="value">{{ fact.time_scope.start or "—" }}</span>
+        </div>
+        <div class="field">
+          <span class="label">End</span>
+          <span class="value">{{ fact.time_scope.end or "—" }}</span>
+        </div>
+        <div class="field">
+          <span class="label">Vintage</span>
+          <span class="value">{{ fact.time_scope.vintage or "—" }}</span>
+        </div>
+      </div>
+    </div>
+
+    <h2>Evidence</h2>
+    <div class="card">
+      <blockquote class="evidence-quote">&ldquo;{{ fact.verbatim_quote }}&rdquo;</blockquote>
+      <div class="evidence-meta">
+        <span><strong>Section:</strong> {{ fact.section_path }}</span>
+        <span><strong>Page:</strong> {{ fact.page_number }}</span>
+        <span><strong>Char offset:</strong> {{ fact.char_offset }}</span>
+        <span><strong>Extracted:</strong> {{ fact.created_at }}</span>
+      </div>
+    </div>
+
+    <h2>Relationships ({{ relationships|length }})</h2>
+    {% if relationships %}
+      {% for rel in relationships %}
+        <div class="relationship-item">
+          <div class="rel-header">
+            <span class="badge badge-{{ rel.relation_type }}">{{ rel.relation_type }}</span>
+            {% if rel.reconciled_dimension %}
+              <span class="muted">dimension: {{ rel.reconciled_dimension }}</span>
+            {% endif %}
+            <span class="confidence">confidence {{ "%.2f"|format(rel.confidence) }}</span>
+          </div>
+          <p class="reasoning-text">{{ rel.reasoning_text }}</p>
+          <a href="/ui/relationships/{{ rel.id }}">View full side-by-side comparison &rarr;</a>
+        </div>
+      {% endfor %}
+    {% else %}
+      <p class="empty-state">No relationships recorded for this fact yet.</p>
+    {% endif %}
+
+    <footer class="site-footer">
+      FactLayer prototype UI &mdash; server-rendered, no JS build step.
+    </footer>
+  </div>
+</body>
+</html>
