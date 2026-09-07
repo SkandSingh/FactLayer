@@ -301,3 +301,29 @@ def test_fallback_mode_page_groups_use_actual_page_numbers_not_computed_ranges()
     # No page is duplicated or invented across groups.
     all_page_numbers = [p.page_number for s in sections for p in s.pages]
     assert all_page_numbers == [1, 2, 3, 47, 48, 49, 50, 51, 52, 53, 54, 55]
+
+
+# ---------------------------------------------------------------------------
+# Degenerate inputs: all-blank pages
+# ---------------------------------------------------------------------------
+# (The zero-pages case is already covered by test_empty_document_returns_no_sections above.)
+
+
+def test_detect_sections_degrades_gracefully_for_all_blank_pages():
+    """A document whose pages carry no extractable text/spans at all
+    (e.g. every page came back blank from pdf_ingest) must not crash
+    section detection -- with zero heading candidates it should simply
+    fall back to page-group chunking, producing section(s) with empty
+    text rather than raising.
+    """
+    blank_pages = [
+        PageContent(page_number=1, text="", spans=[]),
+        PageContent(page_number=2, text="", spans=[]),
+    ]
+
+    sections = detect_sections(blank_pages)
+
+    assert len(sections) == 1
+    assert sections[0].pages == blank_pages
+    assert sections[0].start_page == 1
+    assert sections[0].end_page == 2

@@ -7,8 +7,10 @@ If tests/fixtures/sample.pdf is missing, regenerate it with:
 """
 import os
 
+import fitz  # PyMuPDF
 import pytest
 
+from app import pdf_ingest
 from app.pdf_ingest import PageContent, PDFParseError, Span, parse_pdf
 
 FIXTURE_PATH = os.path.join(os.path.dirname(__file__), "fixtures", "sample.pdf")
@@ -115,3 +117,72 @@ def test_parse_pdf_raises_clear_error_for_corrupt_file(tmp_path):
     bogus.write_bytes(b"this is not a valid pdf file")
     with pytest.raises(PDFParseError):
         parse_pdf(str(bogus))
+
+
+def test_parse_pdf_raises_pdf_parse_error_for_encrypted_pdf(tmp_path):
+    """A genuinely password-protected PDF must surface as a clean
+    PDFParseError (-> HTTP 400 in the upload route), not let PyMuPDF's
+    own encrypted-document state bubble up as an unhandled exception.
+
+    PyMuPDF happily *opens* an encrypted file (fitz.open succeeds) but
+    reports doc.is_encrypted=True; parse_pdf checks that flag explicitly
+    and raises PDFParseError before attempting to read any page content.
+    """
+    encrypted_path = tmp_path / "encrypted.pdf"
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "secret content")
+    doc.save(
+        str(encrypted_path),
+        encryption=fitz.PDF_ENCRYPT_AES_256,
+        user_pw="secret",
+        owner_pw="owner",
+    )
+    doc.close()
+
+    with pytest.raises(PDFParseError):
+        parse_pdf(str(encrypted_path))
+
+
+def test_parse_pdf_handles_page_with_no_extractable_text(tmp_path):
+    """A page with no text content at all (e.g. a blank page, or a page
+    that is purely a scanned image with no text layer) must not crash
+    parse_pdf -- it should just yield a PageContent with empty text and
+    no spans, same as any other page.
+    """
+    blank_path = tmp_path / "blank_pages.pdf"
+    doc = fitz.open()
+    doc.new_page()  # entirely blank, no text inserted
+    doc.new_page()  # also blank
+    doc.save(str(blank_path))
+    doc.close()
+
+    pages = parse_pdf(str(blank_path))
+
+    assert len(pages) == 2
+    for page in pages:
+        assert page.text == ""
+        assert page.spans == []
+
+
+def test_parse_pdf_handles_zero_page_document(monkeypatch):
+    """A PDF that opens successfully but reports zero pages (PyMuPDF
+    itself refuses to *save* a zero-page file, so this can't be produced
+    via a real fixture -- a fake fitz.Document stands in here) must
+    degrade to an empty page list rather than raising or crashing.
+    """
+
+    class _FakeZeroPageDoc:
+        is_encrypted = False
+
+        def __iter__(self):
+            return iter(())
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(pdf_ingest.fitz, "open", lambda path: _FakeZeroPageDoc())
+
+    pages = parse_pdf("irrelevant-path.pdf")
+
+    assert pages == []

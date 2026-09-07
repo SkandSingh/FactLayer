@@ -15,6 +15,7 @@ extraction is still valuable evidence even when normalization falls short.
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 import tempfile
@@ -25,6 +26,8 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from app import comparison, config, extraction, normalization, sectioning, store
 from app.llm.gemini_client import GeminiClient
 from app.pdf_ingest import PDFParseError, parse_pdf
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -69,7 +72,12 @@ def _fill_time_scope(time_scope, raw_value: str) -> None:
         if label:
             try:
                 fy = normalization.parse_fiscal_year(label)
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "Normalization miss: parse_fiscal_year(%r) raised: %s",
+                    label,
+                    exc,
+                )
                 fy = None
             if fy:
                 if not time_scope.start:
@@ -87,7 +95,12 @@ def _fill_time_scope(time_scope, raw_value: str) -> None:
         for candidate in candidates:
             try:
                 point = normalization.parse_point_in_time(candidate)
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "Normalization miss: parse_point_in_time(%r) raised: %s",
+                    candidate,
+                    exc,
+                )
                 point = None
             if point:
                 time_scope.start = point
@@ -132,6 +145,9 @@ async def upload_document(
         try:
             pages = parse_pdf(temp_path)
         except PDFParseError as exc:
+            logger.warning(
+                "Rejecting upload %r: PDF could not be parsed: %s", file.filename, exc
+            )
             raise HTTPException(status_code=400, detail=f"Could not parse PDF: {exc}") from exc
     finally:
         if temp_path is not None and os.path.exists(temp_path):
@@ -144,10 +160,18 @@ async def upload_document(
         fact = located_fact.fact
         try:
             _fill_time_scope(fact.time_scope, fact.raw_value)
-        except Exception:
+        except Exception as exc:
             # Normalization is best-effort; never let it stop a fact from
-            # being stored.
-            pass
+            # being stored -- but a raised exception here (as opposed to
+            # a normal "couldn't confidently parse" miss) is unexpected
+            # and worth a trace.
+            logger.warning(
+                "Normalization miss: _fill_time_scope raised for fact "
+                "attribute=%r raw_value=%r: %s",
+                fact.attribute,
+                fact.raw_value,
+                exc,
+            )
 
     entity_name = _best_effort_entity_name(located_facts)
     document_id = store.insert_document(
@@ -161,7 +185,17 @@ async def upload_document(
         fact = located_fact.fact
         try:
             normalized_value = normalization.normalize_quantity(fact.raw_value, fact.unit)
-        except Exception:
+        except Exception as exc:
+            # normalize_quantity normally signals "couldn't confidently
+            # parse" by returning None, not by raising -- an exception
+            # here is unexpected and worth a trace, but must still never
+            # prevent the fact itself from being stored.
+            logger.warning(
+                "Normalization miss: normalize_quantity(%r, %r) raised: %s",
+                fact.raw_value,
+                fact.unit,
+                exc,
+            )
             normalized_value = None
         normalized_unit = fact.unit
 
@@ -176,8 +210,18 @@ async def upload_document(
         )
         fact_ids.append(fact_id)
 
-    new_facts = [store.get_fact(fact_id) for fact_id in fact_ids]
-    new_facts = [f for f in new_facts if f is not None]
+    fetched = [(fact_id, store.get_fact(fact_id)) for fact_id in fact_ids]
+    missing_ids = [fact_id for fact_id, f in fetched if f is None]
+    if missing_ids:
+        logger.warning(
+            "Document %s: %d just-inserted fact id(s) could not be "
+            "re-fetched from the store and will be excluded from "
+            "comparison: %s",
+            document_id,
+            len(missing_ids),
+            missing_ids,
+        )
+    new_facts = [f for _, f in fetched if f is not None]
     relationships = await comparison.compare_new_document_facts(new_facts, llm_client)
 
     return {

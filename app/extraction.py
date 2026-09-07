@@ -167,6 +167,12 @@ async def _extract_section(section, llm_client) -> list[LocatedFact]:
     for fact in facts:
         page_number, char_offset = _locate_quote(fact.verbatim_quote, section.pages)
         if page_number is None:
+            logger.warning(
+                "Section %r: could not locate verbatim_quote %r in source "
+                "text; falling back to section start with char_offset=-1.",
+                section.section_path,
+                fact.verbatim_quote,
+            )
             page_number = (
                 section.pages[0].page_number if section.pages else section.start_page
             )
