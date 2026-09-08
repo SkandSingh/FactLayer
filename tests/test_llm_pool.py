@@ -34,6 +34,18 @@ class _FakeLLMClient(LLMClient):
         return self.response
 
 
+class _AlwaysFailsLLMClient(LLMClient):
+    """Test double that always raises, simulating an exhausted/dead key."""
+
+    def __init__(self, name: str):
+        self.name = name
+        self.call_count = 0
+
+    async def generate(self, prompt: str) -> str:
+        self.call_count += 1
+        raise RuntimeError(f"{self.name} is exhausted")
+
+
 def test_round_robin_distributes_evenly_across_three_clients():
     clients = [_FakeLLMClient("a"), _FakeLLMClient("b"), _FakeLLMClient("c")]
     pool = RoundRobinLLMClient(clients)
@@ -93,3 +105,42 @@ def test_concurrent_calls_distribute_correctly_without_races():
     # calls, each client gets exactly half.
     assert clients[0].call_count == 5
     assert clients[1].call_count == 5
+
+
+def test_failing_client_fails_over_to_next_client():
+    dead = _AlwaysFailsLLMClient("dead")
+    healthy = _FakeLLMClient("healthy")
+    pool = RoundRobinLLMClient([dead, healthy])
+
+    result = asyncio.run(pool.generate("prompt"))
+
+    assert result == "response-from-healthy"
+    assert dead.call_count == 1
+    assert healthy.call_count == 1
+
+
+def test_failing_client_does_not_sink_later_calls():
+    dead = _AlwaysFailsLLMClient("dead")
+    healthy = _FakeLLMClient("healthy")
+    pool = RoundRobinLLMClient([dead, healthy])
+
+    results = asyncio.run(_generate_n_times_sequentially(pool, 4))
+
+    # Every call round-robins past "dead" and lands on "healthy" instead of
+    # failing outright.
+    assert results == ["response-from-healthy"] * 4
+    assert dead.call_count == 4
+    assert healthy.call_count == 4
+
+
+def test_all_clients_failing_raises_the_last_exception():
+    dead_a = _AlwaysFailsLLMClient("dead-a")
+    dead_b = _AlwaysFailsLLMClient("dead-b")
+    pool = RoundRobinLLMClient([dead_a, dead_b])
+
+    with pytest.raises(RuntimeError, match="exhausted"):
+        asyncio.run(pool.generate("prompt"))
+
+    # Both clients were tried before giving up.
+    assert dead_a.call_count == 1
+    assert dead_b.call_count == 1
