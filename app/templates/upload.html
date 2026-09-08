@@ -2,7 +2,8 @@
 {% block title %}FactLayer — Upload{% endblock %}
 {% block content %}
 
-  <div class="hero-panel">
+  <div class="intro-header">
+    <span class="eyebrow">Add to the ledger</span>
     <h1>Upload documents</h1>
     <p class="section-intro">
       Upload one or more PDFs. Each one is parsed, sectioned, and sent through
@@ -10,7 +11,7 @@
       store — so uploading several at once already relates them to each
       other, not just to what came before.
     </p>
-    <form method="post" action="/ui/upload" enctype="multipart/form-data" class="hero-form">
+    <form method="post" action="/ui/upload" enctype="multipart/form-data" class="upload-form">
       <input class="field-input" type="file" name="files" accept="application/pdf" multiple required>
       <button type="submit" class="btn">Upload</button>
     </form>
@@ -23,19 +24,19 @@
       </div>
 
       {% if documents_failed %}
-        <div class="upload-status error">
+        <div class="status-line error">
           {{ documents_failed }} file{{ "s" if documents_failed != 1 else "" }} failed to process — see details below.
         </div>
       {% endif %}
 
       {% for result in results %}
-        <div class="card">
+        <div class="panel">
           {% if result.error %}
-            <div class="upload-status error" style="margin-bottom: 0;">
+            <div class="status-line error" style="margin-bottom: 0;">
               <strong>{{ result.filename }}</strong> — {{ result.error }}
             </div>
           {% else %}
-            <div class="upload-status success" style="margin-bottom: 0;">
+            <div class="status-line success" style="margin-bottom: 0;">
               <strong>{{ result.filename }}</strong> processed successfully.
             </div>
             <div class="field-grid" style="margin-top: var(--space-4);">
@@ -45,15 +46,15 @@
               </div>
               <div class="field">
                 <span class="label">Sections</span>
-                <span class="value">{{ result.section_count }}</span>
+                <span class="value mono">{{ result.section_count }}</span>
               </div>
               <div class="field">
                 <span class="label">Facts extracted</span>
-                <span class="value">{{ result.facts_extracted }}</span>
+                <span class="value mono">{{ result.facts_extracted }}</span>
               </div>
               <div class="field">
                 <span class="label">Relationships found</span>
-                <span class="value">{{ result.relationships_found }}</span>
+                <span class="value mono">{{ result.relationships_found }}</span>
               </div>
             </div>
             <p style="margin-top: var(--space-4); margin-bottom: 0;">

@@ -12,7 +12,6 @@
       <ul class="doc-list">
         {% for doc in documents %}
           <li>
-            <span class="doc-icon">PDF</span>
             <a class="doc-filename" href="/ui/?entity_name={{ (doc.entity_name or '') | urlencode }}">{{ doc.filename }}</a>
             <span class="doc-meta">{{ doc.entity_name or "unknown entity" }} &middot; uploaded {{ doc.uploaded_at }}</span>
           </li>
@@ -57,9 +56,9 @@
                 <td class="value-cell">{{ fact.raw_value }}{% if fact.unit %} {{ fact.unit }}{% endif %}</td>
                 <td class="timescope-cell">{{ fact.time_scope.label or fact.time_scope.period_type }}</td>
                 <td>
-                  <span class="confidence-meter">
-                    <span class="confidence-track"><span class="confidence-fill" style="width: {{ (fact.confidence * 100) | int }}%;"></span></span>
-                    <span class="confidence-value">{{ "%.2f"|format(fact.confidence) }}</span>
+                  <span class="confidence-score">
+                    <span class="num">{{ "%.2f"|format(fact.confidence) }}</span>
+                    <span class="qual">{% if fact.confidence >= 0.85 %}high{% elif fact.confidence >= 0.6 %}moderate{% else %}low{% endif %}</span>
                   </span>
                 </td>
               </tr>

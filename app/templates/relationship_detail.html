@@ -6,14 +6,14 @@
 
   <h1>Relationship #{{ relationship.id }}</h1>
 
-  <div class="verdict-banner verdict-banner--{{ relationship.relation_type }}">
-    <span class="badge badge-{{ relationship.relation_type }}">{{ relationship.relation_type }}</span>
+  <div class="verdict">
+    <span class="relation-type relation-type--{{ relationship.relation_type }}">{{ relationship.relation_type }}</span>
     <p class="reasoning-text">{{ relationship.reasoning_text }}</p>
     <div class="verdict-meta muted">
       {% if relationship.reconciled_dimension %}
         dimension: {{ relationship.reconciled_dimension }} &middot;
       {% endif %}
-      confidence {{ "%.2f"|format(relationship.confidence) }}
+      confidence <span class="mono">{{ "%.2f"|format(relationship.confidence) }}</span>
     </div>
   </div>
 
@@ -32,7 +32,7 @@
         </div>
         <div class="field">
           <span class="label">Value</span>
-          <span class="value">{{ fact_a.raw_value }}{% if fact_a.unit %} {{ fact_a.unit }}{% endif %}</span>
+          <span class="value mono">{{ fact_a.raw_value }}{% if fact_a.unit %} {{ fact_a.unit }}{% endif %}</span>
         </div>
         <div class="field">
           <span class="label">Time scope</span>
@@ -67,7 +67,7 @@
         </div>
         <div class="field">
           <span class="label">Value</span>
-          <span class="value">{{ fact_b.raw_value }}{% if fact_b.unit %} {{ fact_b.unit }}{% endif %}</span>
+          <span class="value mono">{{ fact_b.raw_value }}{% if fact_b.unit %} {{ fact_b.unit }}{% endif %}</span>
         </div>
         <div class="field">
           <span class="label">Time scope</span>

@@ -6,15 +6,15 @@
 
   <h1>{{ fact.entity_name }} &mdash; {{ fact.attribute }}</h1>
 
-  <div class="card">
+  <div class="panel">
     <div class="field-grid">
       <div class="field">
         <span class="label">Raw value</span>
-        <span class="value">{{ fact.raw_value }}{% if fact.unit %} {{ fact.unit }}{% endif %}</span>
+        <span class="value mono">{{ fact.raw_value }}{% if fact.unit %} {{ fact.unit }}{% endif %}</span>
       </div>
       <div class="field">
         <span class="label">Normalized value</span>
-        <span class="value">
+        <span class="value mono">
           {% if fact.normalized_value is not none %}
             {{ fact.normalized_value }}{% if fact.normalized_unit %} {{ fact.normalized_unit }}{% endif %}
           {% else %}
@@ -33,15 +33,15 @@
       <div class="field">
         <span class="label">Confidence</span>
         <span class="value">
-          <span class="confidence-meter">
-            <span class="confidence-track"><span class="confidence-fill" style="width: {{ (fact.confidence * 100) | int }}%;"></span></span>
-            <span class="confidence-value">{{ "%.2f"|format(fact.confidence) }}</span>
+          <span class="confidence-score">
+            <span class="num">{{ "%.2f"|format(fact.confidence) }}</span>
+            <span class="qual">{% if fact.confidence >= 0.85 %}high{% elif fact.confidence >= 0.6 %}moderate{% else %}low{% endif %}</span>
           </span>
         </span>
       </div>
       <div class="field">
         <span class="label">Document id</span>
-        <span class="value">{{ fact.document_id }}</span>
+        <span class="value mono">{{ fact.document_id }}</span>
       </div>
     </div>
 
@@ -57,15 +57,15 @@
       </div>
       <div class="field">
         <span class="label">Start</span>
-        <span class="value">{{ fact.time_scope.start or "—" }}</span>
+        <span class="value mono">{{ fact.time_scope.start or "—" }}</span>
       </div>
       <div class="field">
         <span class="label">End</span>
-        <span class="value">{{ fact.time_scope.end or "—" }}</span>
+        <span class="value mono">{{ fact.time_scope.end or "—" }}</span>
       </div>
       <div class="field">
         <span class="label">Vintage</span>
-        <span class="value">{{ fact.time_scope.vintage or "—" }}</span>
+        <span class="value mono">{{ fact.time_scope.vintage or "—" }}</span>
       </div>
     </div>
   </div>
@@ -87,11 +87,11 @@
     {% for rel in relationships %}
       <div class="relationship-item">
         <div class="rel-header">
-          <span class="badge badge-{{ rel.relation_type }}">{{ rel.relation_type }}</span>
+          <span class="relation-type relation-type--{{ rel.relation_type }}">{{ rel.relation_type }}</span>
           {% if rel.reconciled_dimension %}
             <span class="muted">dimension: {{ rel.reconciled_dimension }}</span>
           {% endif %}
-          <span class="confidence">confidence {{ "%.2f"|format(rel.confidence) }}</span>
+          <span class="confidence-inline">confidence {{ "%.2f"|format(rel.confidence) }}</span>
         </div>
         <p class="reasoning-text">{{ rel.reasoning_text }}</p>
         <a class="rel-link" href="/ui/relationships/{{ rel.id }}">View full side-by-side comparison &rarr;</a>
