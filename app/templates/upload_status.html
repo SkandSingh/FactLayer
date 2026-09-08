@@ -1,0 +1,148 @@
+{% extends "_base.html" %}
+{% block title %}FactLayer — Upload progress{% endblock %}
+{% block content %}
+
+  <a class="back-link" href="/ui/upload">&larr; upload more documents</a>
+
+  <div class="intro-header">
+    <span class="eyebrow">Batch {{ job_id }}</span>
+    <h1>Processing uploads</h1>
+    <p class="section-intro" id="overall-status">
+      {% if job.status == "running" %}
+        File {{ job.current_file_index + 1 }} of {{ job.files|length }} &mdash; still processing&hellip;
+      {% elif job.status == "completed" %}
+        Done &mdash; {{ job.files|length }} file{{ "s" if job.files|length != 1 else "" }} processed.
+      {% else %}
+        Batch failed{% if job.error %}: {{ job.error }}{% endif %}.
+      {% endif %}
+    </p>
+  </div>
+
+  <section class="page-section" id="file-list" data-job-status="{{ job.status }}">
+    {% for file in job.files %}
+      <div class="panel" data-file-index="{{ loop.index0 }}" data-file-stage="{{ file.stage }}">
+        <div class="status-line {% if file.stage == 'done' %}success{% elif file.stage == 'failed' %}error{% endif %}" style="margin-bottom: 0;">
+          <strong>{{ file.filename }}</strong> &mdash;
+          <span class="file-stage-label">
+            {% if file.stage == "failed" %}
+              Failed: {{ file.error }}
+            {% else %}
+              {{ stage_labels.get(file.stage, file.stage) }}{% if file.stage_detail %} ({{ file.stage_detail }}){% endif %}
+            {% endif %}
+          </span>
+        </div>
+
+        {% if file.result %}
+          <div class="field-grid result-grid" style="margin-top: var(--space-4);">
+            <div class="field">
+              <span class="label">Entity</span>
+              <span class="value entity-value">{{ file.result.entity_name or "—" }}</span>
+            </div>
+            <div class="field">
+              <span class="label">Sections</span>
+              <span class="value mono section-count-value">{{ file.result.section_count }}</span>
+            </div>
+            <div class="field">
+              <span class="label">Facts extracted</span>
+              <span class="value mono facts-value">{{ file.result.facts_extracted }}</span>
+            </div>
+            <div class="field">
+              <span class="label">Relationships found</span>
+              <span class="value mono relationships-value">{{ file.result.relationships_found }}</span>
+            </div>
+          </div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </section>
+
+  <p id="view-facts-link" {% if job.status == "running" %}hidden{% endif %}>
+    <a class="rel-link" href="/ui/">View all facts &rarr;</a>
+  </p>
+
+{% if job.status == "running" %}
+<script>
+(function () {
+  var jobId = {{ job_id | tojson }};
+  var stageLabels = {{ stage_labels | tojson }};
+  var pollDelayMs = 1200;
+
+  var overallEl = document.getElementById("overall-status");
+  var listEl = document.getElementById("file-list");
+  var viewLinkEl = document.getElementById("view-facts-link");
+  var panels = listEl.querySelectorAll(".panel");
+
+  function labelFor(stage) {
+    return stageLabels[stage] || stage;
+  }
+
+  function renderFile(panel, file) {
+    panel.setAttribute("data-file-stage", file.stage);
+    var statusLine = panel.querySelector(".status-line");
+    var labelSpan = panel.querySelector(".file-stage-label");
+
+    statusLine.classList.remove("success", "error");
+    if (file.stage === "done") {
+      statusLine.classList.add("success");
+    } else if (file.stage === "failed") {
+      statusLine.classList.add("error");
+    }
+
+    if (file.stage === "failed") {
+      labelSpan.textContent = "Failed: " + (file.error || "unknown error");
+    } else {
+      var detail = file.stage_detail ? " (" + file.stage_detail + ")" : "";
+      labelSpan.textContent = labelFor(file.stage) + detail;
+    }
+
+    if (file.result && !panel.querySelector(".result-grid")) {
+      var grid = document.createElement("div");
+      grid.className = "field-grid result-grid";
+      grid.style.marginTop = "var(--space-4)";
+      var r = file.result;
+      var entity = r.entity_name ? String(r.entity_name) : "—";
+      grid.innerHTML =
+        '<div class="field"><span class="label">Entity</span><span class="value">' + entity + "</span></div>" +
+        '<div class="field"><span class="label">Sections</span><span class="value mono">' + r.section_count + "</span></div>" +
+        '<div class="field"><span class="label">Facts extracted</span><span class="value mono">' + r.facts_extracted + "</span></div>" +
+        '<div class="field"><span class="label">Relationships found</span><span class="value mono">' + r.relationships_found + "</span></div>";
+      panel.appendChild(grid);
+    }
+  }
+
+  function poll() {
+    fetch("/documents/batch/status/" + jobId)
+      .then(function (resp) { return resp.json(); })
+      .then(function (data) {
+        data.files.forEach(function (file, i) {
+          if (panels[i]) {
+            renderFile(panels[i], file);
+          }
+        });
+
+        if (data.status === "running") {
+          overallEl.textContent =
+            "File " + (data.current_file_index + 1) + " of " + data.total_files + " — still processing…";
+          setTimeout(poll, pollDelayMs);
+        } else if (data.status === "completed") {
+          overallEl.textContent =
+            "Done — " + data.total_files + " file" + (data.total_files !== 1 ? "s" : "") + " processed.";
+          viewLinkEl.hidden = false;
+        } else {
+          overallEl.textContent = "Batch failed" + (data.error ? ": " + data.error : ".") ;
+          viewLinkEl.hidden = false;
+        }
+      })
+      .catch(function () {
+        // Transient network hiccup -- keep trying rather than freezing the
+        // page in whatever state it last saw.
+        setTimeout(poll, pollDelayMs);
+      });
+  }
+
+  setTimeout(poll, pollDelayMs);
+})();
+</script>
+{% endif %}
+
+{% endblock %}

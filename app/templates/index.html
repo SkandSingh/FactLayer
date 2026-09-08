@@ -2,6 +2,15 @@
 {% block title %}FactLayer — Facts{% endblock %}
 {% block content %}
 
+  {% if job_running %}
+    <div class="status-line" style="margin-bottom: var(--space-6);">
+      A document batch is still processing — results below may be incomplete.
+      {% if running_job_id %}
+        <a href="/ui/upload/status/{{ running_job_id }}">View progress &rarr;</a>
+      {% endif %}
+    </div>
+  {% endif %}
+
   <section class="page-section">
     <div class="page-section-head">
       <h1>Documents</h1>

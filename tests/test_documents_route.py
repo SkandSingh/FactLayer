@@ -11,6 +11,7 @@ approach as tests/test_store.py.
 """
 import json
 import os
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -67,7 +68,37 @@ def temp_db(tmp_path, monkeypatch):
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    # Used as a context manager (not a bare TestClient(app)) so the
+    # underlying anyio blocking portal -- and the event loop it runs -- is
+    # kept alive across requests within a test. Without this, each request
+    # would spin up and tear down its own short-lived portal, which would
+    # cancel the background asyncio.create_task used by
+    # /documents/batch/async before it ever got to run.
+    with TestClient(app) as c:
+        yield c
+
+
+def _poll_job_until_finished(client, job_id, timeout_seconds=2.0, interval_seconds=0.05):
+    """Polls GET /documents/batch/status/{job_id} until status is no longer
+    "running", or raises AssertionError once `timeout_seconds` has elapsed.
+
+    The background job runs via `asyncio.create_task` on the same event
+    loop TestClient's underlying anyio/httpx transport drives, so it makes
+    progress only as the test itself yields control (e.g. via each HTTP
+    call TestClient makes) -- a single status check right after kicking
+    off the job is not guaranteed to see anything past "running", hence
+    polling with a bounded retry loop rather than a fixed sleep.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    body = None
+    while time.monotonic() < deadline:
+        resp = client.get(f"/documents/batch/status/{job_id}")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        if body["status"] != "running":
+            return body
+        time.sleep(interval_seconds)
+    raise AssertionError(f"Job {job_id} did not finish within {timeout_seconds}s: {body}")
 
 
 def test_upload_pdf_end_to_end_persists_normalized_facts(client):
@@ -241,3 +272,89 @@ def test_batch_upload_one_valid_one_invalid_partial_success(client):
 
     persisted = store.list_facts(document_id=successes[0]["document_id"])
     assert len(persisted) > 0
+
+
+def test_batch_async_returns_job_id_immediately(client):
+    canned_response = json.dumps([_canned_fact_dict()])
+    fake_client = FakeLLMClient(response=canned_response)
+    app.dependency_overrides[documents_routes.get_llm_client] = lambda: fake_client
+
+    try:
+        with open(FIXTURE_PATH, "rb") as f1, open(FIXTURE_PATH, "rb") as f2:
+            resp = client.post(
+                "/documents/batch/async",
+                files=[
+                    ("files", ("sample1.pdf", f1, "application/pdf")),
+                    ("files", ("sample2.pdf", f2, "application/pdf")),
+                ],
+            )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert set(body.keys()) == {"job_id"}
+        assert isinstance(body["job_id"], str) and body["job_id"]
+
+        final = _poll_job_until_finished(client, body["job_id"])
+    finally:
+        app.dependency_overrides.pop(documents_routes.get_llm_client, None)
+
+    assert final["status"] == "completed"
+    assert final["total_files"] == 2
+    assert len(final["files"]) == 2
+    for f in final["files"]:
+        assert f["stage"] == "done"
+        assert f["error"] is None
+        assert f["result"]["facts_extracted"] > 0
+        assert f["result"]["entity_name"] == "Acme Corp"
+
+    # Same shape/outcome the synchronous /documents/batch endpoint would
+    # have produced: two distinct persisted documents.
+    document_ids = [f["result"]["document_id"] for f in final["files"]]
+    assert len(set(document_ids)) == 2
+    for doc_id in document_ids:
+        assert len(store.list_facts(document_id=doc_id)) > 0
+
+
+def test_batch_async_status_for_unknown_job_returns_404(client):
+    resp = client.get("/documents/batch/status/does-not-exist")
+    assert resp.status_code == 404
+
+
+def test_batch_async_partial_failure_matches_sync_batch_semantics(client):
+    canned_response = json.dumps([_canned_fact_dict()])
+    fake_client = FakeLLMClient(response=canned_response)
+    app.dependency_overrides[documents_routes.get_llm_client] = lambda: fake_client
+
+    try:
+        with open(FIXTURE_PATH, "rb") as f1:
+            resp = client.post(
+                "/documents/batch/async",
+                files=[
+                    ("files", ("sample.pdf", f1, "application/pdf")),
+                    (
+                        "files",
+                        (
+                            "not_a_pdf.txt",
+                            b"this is plain text, not a pdf",
+                            "text/plain",
+                        ),
+                    ),
+                ],
+            )
+        assert resp.status_code == 200, resp.text
+        job_id = resp.json()["job_id"]
+
+        final = _poll_job_until_finished(client, job_id)
+    finally:
+        app.dependency_overrides.pop(documents_routes.get_llm_client, None)
+
+    assert final["status"] == "completed"
+    assert len(final["files"]) == 2
+
+    good, bad = final["files"]
+    assert good["filename"] == "sample.pdf"
+    assert good["stage"] == "done"
+    assert good["result"] is not None
+
+    assert bad["filename"] == "not_a_pdf.txt"
+    assert bad["stage"] == "failed"
+    assert "must be a PDF" in bad["error"]

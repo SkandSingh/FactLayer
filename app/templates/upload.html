@@ -15,59 +15,11 @@
       <input class="field-input" type="file" name="files" accept="application/pdf" multiple required>
       <button type="submit" class="btn">Upload</button>
     </form>
+    <p class="section-intro" style="margin-top: var(--space-4); margin-bottom: 0;">
+      Submitting redirects to a progress page — processing runs in the background, so you'll see each file's
+      stage (parsing, sectioning, extracting, normalizing, storing, comparing) as it happens instead of a blank
+      hang.
+    </p>
   </div>
-
-  {% if results is not none %}
-    <section class="page-section">
-      <div class="page-section-head">
-        <h1>Results</h1>
-      </div>
-
-      {% if documents_failed %}
-        <div class="status-line error">
-          {{ documents_failed }} file{{ "s" if documents_failed != 1 else "" }} failed to process — see details below.
-        </div>
-      {% endif %}
-
-      {% for result in results %}
-        <div class="panel">
-          {% if result.error %}
-            <div class="status-line error" style="margin-bottom: 0;">
-              <strong>{{ result.filename }}</strong> — {{ result.error }}
-            </div>
-          {% else %}
-            <div class="status-line success" style="margin-bottom: 0;">
-              <strong>{{ result.filename }}</strong> processed successfully.
-            </div>
-            <div class="field-grid" style="margin-top: var(--space-4);">
-              <div class="field">
-                <span class="label">Entity</span>
-                <span class="value">{{ result.entity_name or "—" }}</span>
-              </div>
-              <div class="field">
-                <span class="label">Sections</span>
-                <span class="value mono">{{ result.section_count }}</span>
-              </div>
-              <div class="field">
-                <span class="label">Facts extracted</span>
-                <span class="value mono">{{ result.facts_extracted }}</span>
-              </div>
-              <div class="field">
-                <span class="label">Relationships found</span>
-                <span class="value mono">{{ result.relationships_found }}</span>
-              </div>
-            </div>
-            <p style="margin-top: var(--space-4); margin-bottom: 0;">
-              {% if result.entity_name %}
-                <a class="rel-link" href="/ui/?entity_name={{ result.entity_name | urlencode }}">View this document's facts &rarr;</a>
-              {% else %}
-                <a class="rel-link" href="/ui/">View all facts &rarr;</a>
-              {% endif %}
-            </p>
-          {% endif %}
-        </div>
-      {% endfor %}
-    </section>
-  {% endif %}
 
 {% endblock %}

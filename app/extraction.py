@@ -297,13 +297,19 @@ async def _extract_batch(batch: list, llm_client, section_by_path: dict) -> list
     return located
 
 
-async def extract_facts_from_document(sections: list, llm_client) -> list:
+async def extract_facts_from_document(sections: list, llm_client, on_batch=None) -> list:
     """Extract facts from every section of a document.
 
     Args:
         sections: list[Section] (see app.sectioning).
         llm_client: an LLMClient (duck-typed: any object with an async
             `generate(prompt: str) -> str` method).
+        on_batch: optional plain (non-async) callback, called as
+            `on_batch(batch_number, total_batches)` (both 1-based/total)
+            right before each batch's LLM call is dispatched. Purely for
+            progress reporting (e.g. an in-memory job tracker) -- never
+            called when omitted, and its absence changes nothing about
+            extraction itself.
 
     Returns:
         list[LocatedFact], for whichever batches succeeded. A batch whose
@@ -315,22 +321,28 @@ async def extract_facts_from_document(sections: list, llm_client) -> list:
     is then bounded across BATCHES (not individual sections), by
     `config.MAX_CONCURRENT_LLM_CALLS` via a semaphore, so a document with
     many batches doesn't fire an unbounded number of simultaneous LLM
-    calls.
+    calls. Batches can therefore start out of their original order once
+    more than `MAX_CONCURRENT_LLM_CALLS` are queued up -- `on_batch`'s
+    "batch N/total" numbering reflects each batch's position in the
+    original packing order, not completion order.
     """
     if not sections:
         return []
 
     section_by_path = {s.section_path: s for s in sections}
     batches = _batch_sections(sections)
+    total_batches = len(batches)
 
     semaphore = asyncio.Semaphore(config.MAX_CONCURRENT_LLM_CALLS)
 
-    async def _bounded(batch):
+    async def _bounded(batch_index, batch):
         async with semaphore:
+            if on_batch:
+                on_batch(batch_index + 1, total_batches)
             return await _extract_batch(batch, llm_client, section_by_path)
 
     results = await asyncio.gather(
-        *(_bounded(batch) for batch in batches), return_exceptions=True
+        *(_bounded(i, batch) for i, batch in enumerate(batches)), return_exceptions=True
     )
 
     located_facts: list[LocatedFact] = []
