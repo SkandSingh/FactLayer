@@ -24,7 +24,7 @@ from collections import Counter
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app import comparison, config, extraction, normalization, sectioning, store
-from app.llm.gemini_client import GeminiClient
+from app.llm.factory import build_default_llm_client
 from app.pdf_ingest import PDFParseError, parse_pdf
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,12 @@ def _looks_date_like(text: str | None) -> bool:
 
 
 def get_llm_client():
-    return GeminiClient()
+    try:
+        return build_default_llm_client()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=500, detail=f"No LLM API keys configured: {exc}"
+        ) from exc
 
 
 def _is_pdf_upload(file: UploadFile) -> bool:
@@ -114,28 +119,15 @@ def _best_effort_entity_name(located_facts: list) -> str | None:
     return Counter(names).most_common(1)[0][0]
 
 
-@router.post("/documents")
-async def upload_document(
-    file: UploadFile = File(...),
-    llm_client=Depends(get_llm_client),
-):
-    contents = await file.read()
+async def _process_one_document(contents: bytes, filename: str, llm_client) -> dict:
+    """Runs the full ingest -> section -> extract -> normalize -> store -> compare
+    pipeline for one already-read PDF's bytes. Returns the same response dict
+    shape upload_document currently returns for a single file.
 
-    if len(contents) > config.UPLOAD_MAX_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=(
-                f"File too large: {len(contents)} bytes exceeds the "
-                f"{config.UPLOAD_MAX_BYTES}-byte limit."
-            ),
-        )
-
-    if not _is_pdf_upload(file):
-        raise HTTPException(
-            status_code=400,
-            detail="Uploaded file must be a PDF (.pdf extension or PDF content-type).",
-        )
-
+    Raises HTTPException(400) if the PDF bytes can't be parsed -- callers
+    that need to keep processing other files after one fails (e.g. the
+    batch endpoint) should catch that themselves.
+    """
     temp_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
@@ -146,7 +138,7 @@ async def upload_document(
             pages = parse_pdf(temp_path)
         except PDFParseError as exc:
             logger.warning(
-                "Rejecting upload %r: PDF could not be parsed: %s", file.filename, exc
+                "Rejecting upload %r: PDF could not be parsed: %s", filename, exc
             )
             raise HTTPException(status_code=400, detail=f"Could not parse PDF: {exc}") from exc
     finally:
@@ -175,7 +167,7 @@ async def upload_document(
 
     entity_name = _best_effort_entity_name(located_facts)
     document_id = store.insert_document(
-        filename=file.filename,
+        filename=filename,
         entity_name=entity_name,
         section_count=len(sections),
     )
@@ -226,10 +218,108 @@ async def upload_document(
 
     return {
         "document_id": document_id,
-        "filename": file.filename,
+        "filename": filename,
         "section_count": len(sections),
         "facts_extracted": len(located_facts),
         "fact_ids": fact_ids,
         "entity_name": entity_name,
         "relationships_found": len(relationships),
+    }
+
+
+@router.post("/documents")
+async def upload_document(
+    file: UploadFile = File(...),
+    llm_client=Depends(get_llm_client),
+):
+    contents = await file.read()
+
+    if len(contents) > config.UPLOAD_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"File too large: {len(contents)} bytes exceeds the "
+                f"{config.UPLOAD_MAX_BYTES}-byte limit."
+            ),
+        )
+
+    if not _is_pdf_upload(file):
+        raise HTTPException(
+            status_code=400,
+            detail="Uploaded file must be a PDF (.pdf extension or PDF content-type).",
+        )
+
+    return await _process_one_document(contents, file.filename, llm_client)
+
+
+@router.post("/documents/batch")
+async def upload_documents_batch(
+    files: list[UploadFile] = File(...),
+    llm_client=Depends(get_llm_client),
+):
+    """Batch variant of ``POST /documents``: runs the same pipeline for
+    each file sequentially (not concurrently -- each file's own extraction
+    already fans out internally via MAX_CONCURRENT_LLM_CALLS, and racing
+    whole documents on top of that would just fight over the same
+    rate-limited pool for no benefit).
+
+    Per-file validation is identical to the single-upload path, but a bad
+    file never aborts the batch: it's recorded as an error entry in
+    ``results`` and processing continues with the next file. Because each
+    document's facts are stored (via `_process_one_document` ->
+    `compare_new_document_facts`) before the next document in the batch is
+    processed, within-batch relationships (doc 2 vs doc 1, etc.) emerge
+    naturally from the existing sequential design -- no special handling
+    needed here.
+    """
+    results = []
+    documents_processed = 0
+    documents_failed = 0
+    total_facts_extracted = 0
+    total_relationships_found = 0
+
+    for file in files:
+        contents = await file.read()
+
+        if len(contents) > config.UPLOAD_MAX_BYTES:
+            documents_failed += 1
+            results.append(
+                {
+                    "filename": file.filename,
+                    "error": (
+                        f"File too large: {len(contents)} bytes exceeds the "
+                        f"{config.UPLOAD_MAX_BYTES}-byte limit."
+                    ),
+                }
+            )
+            continue
+
+        if not _is_pdf_upload(file):
+            documents_failed += 1
+            results.append(
+                {
+                    "filename": file.filename,
+                    "error": "Uploaded file must be a PDF (.pdf extension or PDF content-type).",
+                }
+            )
+            continue
+
+        try:
+            result = await _process_one_document(contents, file.filename, llm_client)
+        except HTTPException as exc:
+            documents_failed += 1
+            results.append({"filename": file.filename, "error": str(exc.detail)})
+            continue
+
+        documents_processed += 1
+        total_facts_extracted += result["facts_extracted"]
+        total_relationships_found += result["relationships_found"]
+        results.append(result)
+
+    return {
+        "results": results,
+        "documents_processed": documents_processed,
+        "documents_failed": documents_failed,
+        "total_facts_extracted": total_facts_extracted,
+        "total_relationships_found": total_relationships_found,
     }

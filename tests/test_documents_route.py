@@ -160,3 +160,84 @@ def test_upload_over_size_limit_returns_400_or_413(client, monkeypatch):
         app.dependency_overrides.pop(documents_routes.get_llm_client, None)
 
     assert resp.status_code in (400, 413)
+
+
+def test_batch_upload_two_valid_pdfs_persists_both(client):
+    canned_response = json.dumps([_canned_fact_dict()])
+    fake_client = FakeLLMClient(response=canned_response)
+    app.dependency_overrides[documents_routes.get_llm_client] = lambda: fake_client
+
+    try:
+        with open(FIXTURE_PATH, "rb") as f1, open(FIXTURE_PATH, "rb") as f2:
+            resp = client.post(
+                "/documents/batch",
+                files=[
+                    ("files", ("sample1.pdf", f1, "application/pdf")),
+                    ("files", ("sample2.pdf", f2, "application/pdf")),
+                ],
+            )
+    finally:
+        app.dependency_overrides.pop(documents_routes.get_llm_client, None)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    assert body["documents_processed"] == 2
+    assert body["documents_failed"] == 0
+    assert len(body["results"]) == 2
+
+    document_ids = [r["document_id"] for r in body["results"]]
+    assert len(set(document_ids)) == 2  # two distinct documents
+
+    total_facts = sum(r["facts_extracted"] for r in body["results"])
+    assert body["total_facts_extracted"] == total_facts
+    assert body["total_relationships_found"] == sum(
+        r["relationships_found"] for r in body["results"]
+    )
+
+    # Both documents' facts must actually be persisted.
+    for doc_id in document_ids:
+        persisted = store.list_facts(document_id=doc_id)
+        assert len(persisted) > 0
+
+
+def test_batch_upload_one_valid_one_invalid_partial_success(client):
+    canned_response = json.dumps([_canned_fact_dict()])
+    fake_client = FakeLLMClient(response=canned_response)
+    app.dependency_overrides[documents_routes.get_llm_client] = lambda: fake_client
+
+    try:
+        with open(FIXTURE_PATH, "rb") as f1:
+            resp = client.post(
+                "/documents/batch",
+                files=[
+                    ("files", ("sample.pdf", f1, "application/pdf")),
+                    (
+                        "files",
+                        (
+                            "not_a_pdf.txt",
+                            b"this is plain text, not a pdf",
+                            "text/plain",
+                        ),
+                    ),
+                ],
+            )
+    finally:
+        app.dependency_overrides.pop(documents_routes.get_llm_client, None)
+
+    # Partial success is not a request-level failure.
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    assert body["documents_processed"] == 1
+    assert body["documents_failed"] == 1
+    assert len(body["results"]) == 2
+
+    successes = [r for r in body["results"] if "document_id" in r]
+    errors = [r for r in body["results"] if "error" in r]
+    assert len(successes) == 1
+    assert len(errors) == 1
+    assert errors[0]["filename"] == "not_a_pdf.txt"
+
+    persisted = store.list_facts(document_id=successes[0]["document_id"])
+    assert len(persisted) > 0
