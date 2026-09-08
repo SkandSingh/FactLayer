@@ -42,11 +42,15 @@ LLM_MAX_RETRIES: int = _get_int("LLM_MAX_RETRIES", 3)
 FACTLAYER_DB_PATH: str = os.environ.get("FACTLAYER_DB_PATH", "factlayer.db")
 UPLOAD_MAX_BYTES: int = _get_int("UPLOAD_MAX_BYTES", 52428800)
 
-# Multi-key / multi-provider LLM pool support. GEMINI_API_KEYS/GROK_API_KEYS
+# Multi-key / multi-provider LLM pool support. GEMINI_API_KEYS/GROQ_API_KEYS
 # are comma-separated lists of API keys; calls round-robin across every key
 # from every provider so each additional key adds its own rate-limit quota
 # to the pool. GEMINI_API_KEYS falls back to the existing singular
 # GEMINI_API_KEY var when unset, so single-key setups are unaffected.
+#
+# Groq (groq.com, fast open-model hosting -- Llama/GPT-OSS/Qwen/etc.) is a
+# different company/API from xAI's "Grok" model family; GROQ_API_KEYS is
+# for the former (its keys start with `gsk_`).
 GEMINI_API_KEYS: list[str] = _parse_keys("GEMINI_API_KEYS", "GEMINI_API_KEY")
-GROK_API_KEYS: list[str] = _parse_keys("GROK_API_KEYS")
-GROK_MODEL: str = os.environ.get("GROK_MODEL", "grok-4-fast")
+GROQ_API_KEYS: list[str] = _parse_keys("GROQ_API_KEYS")
+GROQ_MODEL: str = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")

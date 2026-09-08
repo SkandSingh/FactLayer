@@ -28,7 +28,7 @@ rate-limit budget to the pool — this is what actually fixes rate-limit
 stalls, not just retries. In `.env`:
 ```bash
 GEMINI_API_KEYS=key1,key2
-GROK_API_KEYS=key1,key2   # optional, xAI's Grok — same LLMClient interface
+GROQ_API_KEYS=key1,key2   # optional, Groq (groq.com) — same LLMClient interface
 ```
 (`GEMINI_API_KEY`, singular, still works as a one-key shorthand.)
 
@@ -112,7 +112,7 @@ PDF ──▶ parse ──▶ section ──▶ extract (LLM) ──▶ normaliz
    of LLM calls rather than one per section — the single biggest lever on
    both speed and rate-limit exposure. Batches run with bounded concurrency
    (`MAX_CONCURRENT_LLM_CALLS`) against a round-robin pool of every
-   configured Gemini/Grok key (`app/llm/pool.py`, `app/llm/factory.py`) —
+   configured Gemini/Groq key (`app/llm/pool.py`, `app/llm/factory.py`) —
    each additional key adds its own quota to the pool instead of sharing
    one. The prompt asks for a JSON array of facts with an open-ended
    `attribute` label the model invents per document, rather than a fixed
@@ -223,7 +223,7 @@ AI-generated code was not committed unreviewed.
   development — the multi-key round-robin pool and section-batching (see
   Approach) are the two mitigations built for this, but if you're running
   with only one key and a large document, expect it to still take a
-  while; add more keys (any mix of Gemini/Grok) to widen the pool.
+  while; add more keys (any mix of Gemini/Groq) to widen the pool.
 - **`/ask` is keyword/fuzzy retrieval, not semantic search.** It won't
   reliably answer a question phrased with no words in common with the
   underlying facts (e.g. a synonym the extraction never used). Embeddings
