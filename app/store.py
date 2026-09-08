@@ -172,6 +172,32 @@ def insert_relationship(
         conn.close()
 
 
+def relationship_exists(fact_id_a: int, fact_id_b: int) -> bool:
+    """Whether a relationship between these two facts is already recorded,
+    in either order. Guards against the same pair being independently
+    rediscovered and re-inserted across separate comparison passes (e.g.
+    document B's comparison call surfaces a pair that document C's
+    comparison call, run later, also surfaces against the whole store) --
+    within a single `compare_new_document_facts` call this is already
+    deduped, but nothing previously prevented it across separate calls.
+    """
+    conn = db.get_connection()
+    try:
+        db.init_db(conn)
+        row = conn.execute(
+            """
+            SELECT 1 FROM relationships
+            WHERE (fact_id_a = ? AND fact_id_b = ?)
+               OR (fact_id_a = ? AND fact_id_b = ?)
+            LIMIT 1
+            """,
+            (fact_id_a, fact_id_b, fact_id_b, fact_id_a),
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
 def get_relationship(relationship_id: int) -> Optional[Relationship]:
     conn = db.get_connection()
     try:

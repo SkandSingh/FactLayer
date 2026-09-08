@@ -357,3 +357,51 @@ def test_new_facts_too_large_to_repeat_falls_back_to_interleaving(monkeypatch):
     assert len(results) == 1
     assert results[0].fact_id_a == new_facts[0].id
     assert results[0].fact_id_b == candidate.id
+
+
+def test_relationship_already_recorded_by_an_earlier_call_is_not_reinserted():
+    # Regression test for a real duplication bug: the same fact pair,
+    # independently rediscovered by two SEPARATE compare_new_document_facts
+    # calls (e.g. document B's comparison pass, then document C's), used to
+    # be inserted twice -- the in-call `seen_pairs` dedup only covers a
+    # single call, not the store's actual prior state.
+    fact_a = insert_fact(entity_id="L63090HR2011PLC044150", attribute="revenue_from_operations")
+    fact_b = insert_fact(entity_id="L63090HR2011PLC044150", attribute="revenue_from_operations")
+
+    response = json.dumps(
+        [
+            {
+                "fact_id_a": fact_a.id,
+                "fact_id_b": fact_b.id,
+                "relation_type": "corroborates",
+                "reconciled_dimension": None,
+                "reasoning_text": "Same figure both times.",
+                "confidence": 0.9,
+            }
+        ]
+    )
+
+    # First call: genuinely new, gets inserted.
+    first_results = asyncio.run(compare_new_document_facts([fact_a], FakeLLMClient(response=response)))
+    assert len(first_results) == 1
+    assert len(store.list_relationships()) == 1
+
+    # Second call (simulating a later document's comparison pass that
+    # independently rediscovers the same pair, possibly with fact_id_a/b
+    # swapped): must not insert a second row for the same pair.
+    swapped_response = json.dumps(
+        [
+            {
+                "fact_id_a": fact_b.id,
+                "fact_id_b": fact_a.id,
+                "relation_type": "corroborates",
+                "reconciled_dimension": None,
+                "reasoning_text": "Same figure both times.",
+                "confidence": 0.9,
+            }
+        ]
+    )
+    second_results = asyncio.run(compare_new_document_facts([fact_b], FakeLLMClient(response=swapped_response)))
+
+    assert second_results == []
+    assert len(store.list_relationships()) == 1

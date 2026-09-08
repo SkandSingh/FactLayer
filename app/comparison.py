@@ -350,6 +350,15 @@ async def compare_new_document_facts(new_facts: list, llm_client) -> List[Relati
                 continue
             seen_pairs.add(pair_key)
 
+            # Guards across separate `compare_new_document_facts` calls,
+            # not just within this one: a candidate pair surfaced here may
+            # already have been recorded by an earlier document's
+            # comparison pass (observed directly on real data: the same
+            # pair rediscovered and re-inserted three times across three
+            # documents' separate comparison calls).
+            if store.relationship_exists(validated["fact_id_a"], validated["fact_id_b"]):
+                continue
+
             relationship_id = store.insert_relationship(
                 fact_id_a=validated["fact_id_a"],
                 fact_id_b=validated["fact_id_b"],
