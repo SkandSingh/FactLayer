@@ -8,10 +8,11 @@ quote + section/page/offset provenance) visible for a demo.
 """
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.templating import Jinja2Templates
 
 from app import store
+from app.routes.ask import find_relevant_facts
 
 router = APIRouter(prefix="/ui")
 templates = Jinja2Templates(directory="app/templates")
@@ -76,5 +77,33 @@ async def relationship_detail(request: Request, relationship_id: int):
             "relationship": relationship,
             "fact_a": fact_a,
             "fact_b": fact_b,
+        },
+    )
+
+
+@router.get("/ask")
+async def ask_page(request: Request):
+    return templates.TemplateResponse(
+        request,
+        "ask.html",
+        {
+            "question": None,
+            "matched_facts": [],
+            "total_matches": None,
+        },
+    )
+
+
+@router.post("/ask")
+async def ask_page_submit(request: Request, question: str = Form(...)):
+    result = find_relevant_facts(question)
+
+    return templates.TemplateResponse(
+        request,
+        "ask.html",
+        {
+            "question": question,
+            "matched_facts": result["matched_facts"],
+            "total_matches": result["total_matches"],
         },
     )

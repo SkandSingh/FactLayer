@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FactLayer — Ask a question</title>
+  <link rel="stylesheet" href="{{ request.url_for('static', path='style.css') }}">
+</head>
+<body>
+  <div class="page">
+    <header class="site-header">
+      <a class="brand" href="/ui/">FactLayer</a>
+      <span class="tagline">Ask a question</span>
+    </header>
+
+    <a class="back-link" href="/ui/">&larr; back to all facts</a>
+
+    <section>
+      <h1>Ask a question</h1>
+      <p class="muted">
+        Retrieval-only search across every fact from every uploaded document
+        &mdash; no LLM call, just keyword and fuzzy-name matching.
+      </p>
+
+      <form method="post" action="/ui/ask" style="margin-bottom: 1.5rem;">
+        <input type="text" name="question" placeholder="e.g. What was revenue from operations?"
+               value="{{ question or '' }}"
+               style="padding: 0.5rem 0.7rem; border: 1px solid var(--border); border-radius: 6px; min-width: 360px;">
+        <button type="submit" style="padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: white; cursor: pointer;">Ask</button>
+      </form>
+    </section>
+
+    {% if question %}
+      <section>
+        <h2>
+          Results for &ldquo;{{ question }}&rdquo;
+          {% if total_matches is not none %}
+            <span class="muted" style="font-size: 0.85rem; font-weight: normal;">
+              ({{ total_matches }} match{{ "es" if total_matches != 1 else "" }} found{% if matched_facts|length < total_matches %}, showing top {{ matched_facts|length }}{% endif %})
+            </span>
+          {% endif %}
+        </h2>
+
+        {% if matched_facts %}
+          {% for item in matched_facts %}
+            {% set fact = item.fact %}
+            <div class="card">
+              <h3 style="margin-top: 0;">
+                <a href="/ui/facts/{{ fact.id }}">{{ fact.entity_name }} &mdash; {{ fact.attribute }}</a>
+              </h3>
+              <div class="field-grid">
+                <div class="field">
+                  <span class="label">Value</span>
+                  <span class="value">{{ fact.raw_value }}{% if fact.unit %} {{ fact.unit }}{% endif %}</span>
+                </div>
+                <div class="field">
+                  <span class="label">Document</span>
+                  <span class="value">{{ item.document_filename or "unknown document" }}</span>
+                </div>
+                <div class="field">
+                  <span class="label">Confidence</span>
+                  <span class="value confidence">{{ "%.2f"|format(fact.confidence) }}</span>
+                </div>
+              </div>
+
+              <blockquote class="evidence-quote">&ldquo;{{ fact.verbatim_quote }}&rdquo;</blockquote>
+
+              {% if item.relationships %}
+                <h4 style="margin: 1rem 0 0.5rem;">Relationships ({{ item.relationships|length }})</h4>
+                {% for rel in item.relationships %}
+                  <div class="relationship-item">
+                    <div class="rel-header">
+                      <span class="badge badge-{{ rel.relation_type }}">{{ rel.relation_type }}</span>
+                      {% if rel.reconciled_dimension %}
+                        <span class="muted">dimension: {{ rel.reconciled_dimension }}</span>
+                      {% endif %}
+                      <span class="confidence">confidence {{ "%.2f"|format(rel.confidence) }}</span>
+                    </div>
+                    <p class="reasoning-text">{{ rel.reasoning_text }}</p>
+                    <a href="/ui/relationships/{{ rel.id }}">View full side-by-side comparison &rarr;</a>
+                  </div>
+                {% endfor %}
+              {% else %}
+                <p class="empty-state">No relationships recorded for this fact yet.</p>
+              {% endif %}
+            </div>
+          {% endfor %}
+        {% else %}
+          <p class="empty-state">No relevant facts found.</p>
+        {% endif %}
+      </section>
+    {% endif %}
+
+    <footer class="site-footer">
+      FactLayer prototype UI &mdash; server-rendered, no JS build step.
+    </footer>
+  </div>
+</body>
+</html>
