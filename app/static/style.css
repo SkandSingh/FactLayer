@@ -372,10 +372,10 @@ input[type="text"]:focus {
 }
 
 /* ---------------------------------------------------------------------- */
-/* Search hero (Ask page)                                                 */
+/* Hero panel (Upload page)                                               */
 /* ---------------------------------------------------------------------- */
 
-.search-hero {
+.hero-panel {
   background: linear-gradient(180deg, var(--accent-soft), var(--surface));
   border: 1px solid var(--accent-soft-border);
   border-radius: var(--radius-lg);
@@ -384,48 +384,58 @@ input[type="text"]:focus {
   text-align: center;
 }
 
-.search-hero h1 {
+.hero-panel h1 {
   margin-bottom: var(--space-2);
 }
 
-.search-hero .section-intro {
+.hero-panel .section-intro {
   margin: 0 auto var(--space-5);
   text-align: center;
 }
 
-.search-form {
+.hero-form {
   display: flex;
   align-items: stretch;
   gap: var(--space-2);
   max-width: 640px;
   margin: 0 auto;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
-.search-form .field-input {
+.hero-form .field-input {
   flex: 1 1 auto;
   font-size: var(--text-md);
   padding: 0.85rem 1.1rem;
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
+  background: var(--surface);
 }
 
-.search-form .btn {
+.hero-form .btn {
   font-size: var(--text-md);
   padding: 0.85rem 1.5rem;
   border-radius: var(--radius-md);
 }
 
-.results-head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  flex-wrap: wrap;
+.upload-status {
+  max-width: 640px;
+  margin: 0 auto var(--space-6);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
+  text-align: left;
 }
 
-.results-count {
-  color: var(--text-muted);
-  font-size: var(--text-sm);
-  font-weight: 500;
+.upload-status.success {
+  background: var(--corroborates-bg);
+  border: 1px solid var(--corroborates-border);
+  color: var(--corroborates-fg);
+}
+
+.upload-status.error {
+  background: var(--contradicts-bg);
+  border: 1px solid var(--contradicts-border);
+  color: var(--contradicts-fg);
 }
 
 /* ---------------------------------------------------------------------- */

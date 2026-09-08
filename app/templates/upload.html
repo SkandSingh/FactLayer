@@ -1,0 +1,72 @@
+{% extends "_base.html" %}
+{% block title %}FactLayer — Upload{% endblock %}
+{% block content %}
+
+  <div class="hero-panel">
+    <h1>Upload documents</h1>
+    <p class="section-intro">
+      Upload one or more PDFs. Each one is parsed, sectioned, and sent through
+      fact extraction, then compared against every document already in the
+      store — so uploading several at once already relates them to each
+      other, not just to what came before.
+    </p>
+    <form method="post" action="/ui/upload" enctype="multipart/form-data" class="hero-form">
+      <input class="field-input" type="file" name="files" accept="application/pdf" multiple required>
+      <button type="submit" class="btn">Upload</button>
+    </form>
+  </div>
+
+  {% if results is not none %}
+    <section class="page-section">
+      <div class="page-section-head">
+        <h1>Results</h1>
+      </div>
+
+      {% if documents_failed %}
+        <div class="upload-status error">
+          {{ documents_failed }} file{{ "s" if documents_failed != 1 else "" }} failed to process — see details below.
+        </div>
+      {% endif %}
+
+      {% for result in results %}
+        <div class="card">
+          {% if result.error %}
+            <div class="upload-status error" style="margin-bottom: 0;">
+              <strong>{{ result.filename }}</strong> — {{ result.error }}
+            </div>
+          {% else %}
+            <div class="upload-status success" style="margin-bottom: 0;">
+              <strong>{{ result.filename }}</strong> processed successfully.
+            </div>
+            <div class="field-grid" style="margin-top: var(--space-4);">
+              <div class="field">
+                <span class="label">Entity</span>
+                <span class="value">{{ result.entity_name or "—" }}</span>
+              </div>
+              <div class="field">
+                <span class="label">Sections</span>
+                <span class="value">{{ result.section_count }}</span>
+              </div>
+              <div class="field">
+                <span class="label">Facts extracted</span>
+                <span class="value">{{ result.facts_extracted }}</span>
+              </div>
+              <div class="field">
+                <span class="label">Relationships found</span>
+                <span class="value">{{ result.relationships_found }}</span>
+              </div>
+            </div>
+            <p style="margin-top: var(--space-4); margin-bottom: 0;">
+              {% if result.entity_name %}
+                <a class="rel-link" href="/ui/?entity_name={{ result.entity_name | urlencode }}">View this document's facts &rarr;</a>
+              {% else %}
+                <a class="rel-link" href="/ui/">View all facts &rarr;</a>
+              {% endif %}
+            </p>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </section>
+  {% endif %}
+
+{% endblock %}
