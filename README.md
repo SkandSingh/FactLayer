@@ -10,7 +10,7 @@ Built for the Superjoin VIT 2026 Engineering Intern hiring assignment.
 ## Setup and Run Instructions
 
 Requires Python 3.11+ and at least one [Gemini API key](https://aistudio.google.com/apikey)
-(the app uses `gemini-3.5-flash` by default — it has a workable free tier,
+(the app uses `gemini-flash-lite-latest` by default — it has a workable free tier,
 though a fresh free-tier key can be capped as low as 5 requests/minute).
 
 ```bash

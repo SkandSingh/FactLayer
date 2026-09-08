@@ -35,7 +35,7 @@ def _parse_keys(csv_env_var: str, singular_fallback_env_var: str | None = None) 
 
 
 GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
+GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", "gemini-flash-lite-latest")
 MAX_CONCURRENT_LLM_CALLS: int = _get_int("MAX_CONCURRENT_LLM_CALLS", 4)
 LLM_TIMEOUT_SECONDS: int = _get_int("LLM_TIMEOUT_SECONDS", 60)
 LLM_MAX_RETRIES: int = _get_int("LLM_MAX_RETRIES", 3)
