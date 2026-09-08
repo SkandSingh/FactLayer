@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}FactLayer{% endblock %}</title>
+  <link rel="stylesheet" href="{{ request.url_for('static', path='style.css') }}">
+</head>
+<body>
+  <div class="page">
+    <header class="site-header">
+      <div class="site-header-inner">
+        <a class="brand" href="/ui/">
+          <span class="brand-mark">FL</span>
+          <span class="brand-name">FactLayer</span>
+        </a>
+        <nav class="site-nav">
+          <a href="/ui/" class="{% if request.url.path == '/ui/' %}active{% endif %}">Facts</a>
+          <a href="/ui/ask" class="{% if request.url.path.startswith('/ui/ask') %}active{% endif %}">Ask</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="site-footer">
+      FactLayer prototype UI &mdash; server-rendered, no JS build step.
+    </footer>
+  </div>
+</body>
+</html>

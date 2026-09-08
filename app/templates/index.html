@@ -1,49 +1,44 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FactLayer — Facts</title>
-  <link rel="stylesheet" href="{{ request.url_for('static', path='style.css') }}">
-</head>
-<body>
-  <div class="page">
-    <header class="site-header">
-      <a class="brand" href="/ui/">FactLayer</a>
-      <span class="tagline">Extracted facts, grounded in evidence</span>
-      <a href="/ui/ask">Ask a question</a>
-    </header>
+{% extends "_base.html" %}
+{% block title %}FactLayer — Facts{% endblock %}
+{% block content %}
 
-    <section>
+  <section class="page-section">
+    <div class="page-section-head">
       <h1>Documents</h1>
-      {% if documents %}
-        <ul class="doc-list">
-          {% for doc in documents %}
-            <li>
-              <a class="doc-filename" href="/ui/?entity_name={{ (doc.entity_name or '') | urlencode }}">{{ doc.filename }}</a>
-              <span class="doc-meta">{{ doc.entity_name or "unknown entity" }} &middot; uploaded {{ doc.uploaded_at }}</span>
-            </li>
-          {% endfor %}
-        </ul>
-      {% else %}
-        <p class="empty-state">No documents uploaded yet.</p>
-      {% endif %}
-    </section>
+    </div>
+    <p class="section-intro">Every uploaded source document, with the facts extracted from it grounded back to verbatim quotes.</p>
 
-    <section>
+    {% if documents %}
+      <ul class="doc-list">
+        {% for doc in documents %}
+          <li>
+            <span class="doc-icon">PDF</span>
+            <a class="doc-filename" href="/ui/?entity_name={{ (doc.entity_name or '') | urlencode }}">{{ doc.filename }}</a>
+            <span class="doc-meta">{{ doc.entity_name or "unknown entity" }} &middot; uploaded {{ doc.uploaded_at }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty-state">No documents uploaded yet.</p>
+    {% endif %}
+  </section>
+
+  <section class="page-section">
+    <div class="page-section-head">
       <h1>Facts{% if filter_entity_name %} for &ldquo;{{ filter_entity_name }}&rdquo;{% endif %}</h1>
+    </div>
 
-      <form method="get" action="/ui/" style="margin-bottom: 1rem;">
-        <input type="text" name="entity_name" placeholder="Filter by entity name..."
-               value="{{ filter_entity_name or '' }}"
-               style="padding: 0.4rem 0.6rem; border: 1px solid var(--border); border-radius: 6px; min-width: 240px;">
-        <button type="submit" style="padding: 0.4rem 0.9rem; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: white; cursor: pointer;">Filter</button>
-        {% if filter_entity_name %}
-          <a class="back-link" href="/ui/" style="margin-left: 0.5rem;">clear</a>
-        {% endif %}
-      </form>
+    <form method="get" action="/ui/" class="filter-form">
+      <input class="field-input" type="text" name="entity_name" placeholder="Filter by entity name..."
+             value="{{ filter_entity_name or '' }}">
+      <button type="submit" class="btn">Filter</button>
+      {% if filter_entity_name %}
+        <a class="back-link" href="/ui/" style="margin-bottom: 0;">clear filter</a>
+      {% endif %}
+    </form>
 
-      {% if facts %}
+    {% if facts %}
+      <div class="table-wrap">
         <table>
           <thead>
             <tr>
@@ -57,23 +52,24 @@
           <tbody>
             {% for fact in facts %}
               <tr>
-                <td><a href="/ui/facts/{{ fact.id }}">{{ fact.entity_name }}</a></td>
-                <td>{{ fact.attribute }}</td>
-                <td>{{ fact.raw_value }}{% if fact.unit %} {{ fact.unit }}{% endif %}</td>
-                <td>{{ fact.time_scope.label or fact.time_scope.period_type }}</td>
-                <td class="confidence">{{ "%.2f"|format(fact.confidence) }}</td>
+                <td class="entity-cell"><a href="/ui/facts/{{ fact.id }}">{{ fact.entity_name }}</a></td>
+                <td class="attribute-cell">{{ fact.attribute }}</td>
+                <td class="value-cell">{{ fact.raw_value }}{% if fact.unit %} {{ fact.unit }}{% endif %}</td>
+                <td class="timescope-cell">{{ fact.time_scope.label or fact.time_scope.period_type }}</td>
+                <td>
+                  <span class="confidence-meter">
+                    <span class="confidence-track"><span class="confidence-fill" style="width: {{ (fact.confidence * 100) | int }}%;"></span></span>
+                    <span class="confidence-value">{{ "%.2f"|format(fact.confidence) }}</span>
+                  </span>
+                </td>
               </tr>
             {% endfor %}
           </tbody>
         </table>
-      {% else %}
-        <p class="empty-state">No facts found.</p>
-      {% endif %}
-    </section>
+      </div>
+    {% else %}
+      <p class="empty-state">No facts found.</p>
+    {% endif %}
+  </section>
 
-    <footer class="site-footer">
-      FactLayer prototype UI &mdash; server-rendered, no JS build step.
-    </footer>
-  </div>
-</body>
-</html>
+{% endblock %}

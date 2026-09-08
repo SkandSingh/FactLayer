@@ -1,109 +1,93 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FactLayer — Relationship {{ relationship.id }}</title>
-  <link rel="stylesheet" href="{{ request.url_for('static', path='style.css') }}">
-</head>
-<body>
-  <div class="page">
-    <header class="site-header">
-      <a class="brand" href="/ui/">FactLayer</a>
-      <span class="tagline">Relationship detail</span>
-    </header>
+{% extends "_base.html" %}
+{% block title %}FactLayer — Relationship {{ relationship.id }}{% endblock %}
+{% block content %}
 
-    <a class="back-link" href="/ui/facts/{{ fact_a.id }}">&larr; back to fact #{{ fact_a.id }}</a>
+  <a class="back-link" href="/ui/facts/{{ fact_a.id }}">&larr; back to fact #{{ fact_a.id }}</a>
 
-    <h1>Relationship #{{ relationship.id }}</h1>
+  <h1>Relationship #{{ relationship.id }}</h1>
 
-    <div class="relationship-summary">
-      <div>
-        <span class="badge badge-{{ relationship.relation_type }}">{{ relationship.relation_type }}</span>
-        {% if relationship.reconciled_dimension %}
-          <span class="muted">&middot; dimension: {{ relationship.reconciled_dimension }}</span>
-        {% endif %}
-        <span class="confidence">&middot; confidence {{ "%.2f"|format(relationship.confidence) }}</span>
-      </div>
-      <p class="reasoning-text">{{ relationship.reasoning_text }}</p>
+  <div class="verdict-banner verdict-banner--{{ relationship.relation_type }}">
+    <span class="badge badge-{{ relationship.relation_type }}">{{ relationship.relation_type }}</span>
+    <p class="reasoning-text">{{ relationship.reasoning_text }}</p>
+    <div class="verdict-meta muted">
+      {% if relationship.reconciled_dimension %}
+        dimension: {{ relationship.reconciled_dimension }} &middot;
+      {% endif %}
+      confidence {{ "%.2f"|format(relationship.confidence) }}
     </div>
-
-    <h2>Evidence side by side</h2>
-    <div class="comparison">
-      <div class="fact-column">
-        <h3><a href="/ui/facts/{{ fact_a.id }}">Fact A &mdash; #{{ fact_a.id }}</a></h3>
-        <div class="field-grid">
-          <div class="field">
-            <span class="label">Entity</span>
-            <span class="value">{{ fact_a.entity_name }}</span>
-          </div>
-          <div class="field">
-            <span class="label">Attribute</span>
-            <span class="value">{{ fact_a.attribute }}</span>
-          </div>
-          <div class="field">
-            <span class="label">Value</span>
-            <span class="value">{{ fact_a.raw_value }}{% if fact_a.unit %} {{ fact_a.unit }}{% endif %}</span>
-          </div>
-          <div class="field">
-            <span class="label">Time scope</span>
-            <span class="value">{{ fact_a.time_scope.label or fact_a.time_scope.period_type }}
-              {% if fact_a.time_scope.start or fact_a.time_scope.end %}
-                ({{ fact_a.time_scope.start or "?" }} &ndash; {{ fact_a.time_scope.end or "?" }})
-              {% endif %}
-            </span>
-          </div>
-          <div class="field">
-            <span class="label">Entity scope</span>
-            <span class="value">{{ fact_a.entity_scope or "—" }}</span>
-          </div>
-        </div>
-        <blockquote class="evidence-quote">&ldquo;{{ fact_a.verbatim_quote }}&rdquo;</blockquote>
-        <div class="evidence-meta">
-          <span><strong>Section:</strong> {{ fact_a.section_path }}</span>
-          <span><strong>Page:</strong> {{ fact_a.page_number }}</span>
-        </div>
-      </div>
-
-      <div class="fact-column">
-        <h3><a href="/ui/facts/{{ fact_b.id }}">Fact B &mdash; #{{ fact_b.id }}</a></h3>
-        <div class="field-grid">
-          <div class="field">
-            <span class="label">Entity</span>
-            <span class="value">{{ fact_b.entity_name }}</span>
-          </div>
-          <div class="field">
-            <span class="label">Attribute</span>
-            <span class="value">{{ fact_b.attribute }}</span>
-          </div>
-          <div class="field">
-            <span class="label">Value</span>
-            <span class="value">{{ fact_b.raw_value }}{% if fact_b.unit %} {{ fact_b.unit }}{% endif %}</span>
-          </div>
-          <div class="field">
-            <span class="label">Time scope</span>
-            <span class="value">{{ fact_b.time_scope.label or fact_b.time_scope.period_type }}
-              {% if fact_b.time_scope.start or fact_b.time_scope.end %}
-                ({{ fact_b.time_scope.start or "?" }} &ndash; {{ fact_b.time_scope.end or "?" }})
-              {% endif %}
-            </span>
-          </div>
-          <div class="field">
-            <span class="label">Entity scope</span>
-            <span class="value">{{ fact_b.entity_scope or "—" }}</span>
-          </div>
-        </div>
-        <blockquote class="evidence-quote">&ldquo;{{ fact_b.verbatim_quote }}&rdquo;</blockquote>
-        <div class="evidence-meta">
-          <span><strong>Section:</strong> {{ fact_b.section_path }}</span>
-          <span><strong>Page:</strong> {{ fact_b.page_number }}</span>
-        </div>
-      </div>
-    </div>
-
-    <footer class="site-footer">
-      FactLayer prototype UI &mdash; server-rendered, no JS build step.
-    </footer>
   </div>
-</body>
-</html>
+
+  <h2>Evidence side by side</h2>
+  <div class="comparison">
+    <div class="fact-column">
+      <h3><span class="fact-label">Fact A</span><a href="/ui/facts/{{ fact_a.id }}">#{{ fact_a.id }}</a></h3>
+      <div class="field-grid field-grid--stacked">
+        <div class="field">
+          <span class="label">Entity</span>
+          <span class="value">{{ fact_a.entity_name }}</span>
+        </div>
+        <div class="field">
+          <span class="label">Attribute</span>
+          <span class="value">{{ fact_a.attribute }}</span>
+        </div>
+        <div class="field">
+          <span class="label">Value</span>
+          <span class="value">{{ fact_a.raw_value }}{% if fact_a.unit %} {{ fact_a.unit }}{% endif %}</span>
+        </div>
+        <div class="field">
+          <span class="label">Time scope</span>
+          <span class="value">{{ fact_a.time_scope.label or fact_a.time_scope.period_type }}
+            {% if fact_a.time_scope.start or fact_a.time_scope.end %}
+              ({{ fact_a.time_scope.start or "?" }} &ndash; {{ fact_a.time_scope.end or "?" }})
+            {% endif %}
+          </span>
+        </div>
+        <div class="field">
+          <span class="label">Entity scope</span>
+          <span class="value">{{ fact_a.entity_scope or "—" }}</span>
+        </div>
+      </div>
+      <blockquote class="evidence-quote compact">{{ fact_a.verbatim_quote }}</blockquote>
+      <div class="evidence-meta">
+        <span><strong>Section</strong>{{ fact_a.section_path }}</span>
+        <span><strong>Page</strong>{{ fact_a.page_number }}</span>
+      </div>
+    </div>
+
+    <div class="fact-column">
+      <h3><span class="fact-label">Fact B</span><a href="/ui/facts/{{ fact_b.id }}">#{{ fact_b.id }}</a></h3>
+      <div class="field-grid field-grid--stacked">
+        <div class="field">
+          <span class="label">Entity</span>
+          <span class="value">{{ fact_b.entity_name }}</span>
+        </div>
+        <div class="field">
+          <span class="label">Attribute</span>
+          <span class="value">{{ fact_b.attribute }}</span>
+        </div>
+        <div class="field">
+          <span class="label">Value</span>
+          <span class="value">{{ fact_b.raw_value }}{% if fact_b.unit %} {{ fact_b.unit }}{% endif %}</span>
+        </div>
+        <div class="field">
+          <span class="label">Time scope</span>
+          <span class="value">{{ fact_b.time_scope.label or fact_b.time_scope.period_type }}
+            {% if fact_b.time_scope.start or fact_b.time_scope.end %}
+              ({{ fact_b.time_scope.start or "?" }} &ndash; {{ fact_b.time_scope.end or "?" }})
+            {% endif %}
+          </span>
+        </div>
+        <div class="field">
+          <span class="label">Entity scope</span>
+          <span class="value">{{ fact_b.entity_scope or "—" }}</span>
+        </div>
+      </div>
+      <blockquote class="evidence-quote compact">{{ fact_b.verbatim_quote }}</blockquote>
+      <div class="evidence-meta">
+        <span><strong>Section</strong>{{ fact_b.section_path }}</span>
+        <span><strong>Page</strong>{{ fact_b.page_number }}</span>
+      </div>
+    </div>
+  </div>
+
+{% endblock %}
