@@ -136,6 +136,67 @@ def test_layout_mode_section_spans_multiple_pages_until_next_heading():
     assert chapter_two.pages == [p4]
 
 
+def _page_with_two_headings(page_number, heading_a, body_a, heading_b, body_b):
+    """A page with TWO large/bold isolated headings, each followed by its
+    own body paragraph -- e.g. a dense summary page with several short
+    sub-headings, which real documents do produce (see the regression
+    this guards: a real 100-page prospectus put 5 such headings on one
+    page alone).
+    """
+    text_a = heading_a + "\n" + body_a + "\n"
+    offset_b = len(text_a)
+    text_b = heading_b + "\n" + body_b
+    full_text = text_a + text_b
+    spans = [
+        _heading_span(page_number, heading_a, char_offset=0, y0=50.0),
+        _body_span(page_number, body_a, char_offset=len(heading_a) + 1, y0=70.0),
+        _heading_span(page_number, heading_b, char_offset=offset_b, y0=150.0),
+        _body_span(page_number, body_b, char_offset=offset_b + len(heading_b) + 1, y0=170.0),
+    ]
+    return PageContent(page_number=page_number, text=full_text, spans=spans)
+
+
+def test_two_headings_on_the_same_page_partition_it_without_duplication():
+    # Regression test: sections sharing a page must NOT each carry a full
+    # duplicate copy of that page's text (observed on a real document: 5
+    # sections on one page, each with that page's full ~4,000 chars -- a
+    # 3.6x content-amplification bug that multiplied both LLM cost and
+    # duplicate-extracted facts).
+    p1 = _page_with_two_headings(1, "Alpha Section", "alpha body text", "Beta Section", "beta body text")
+    p2 = _page_with_heading(2, "Gamma Section")
+    p3 = _page_with_heading(3, "Delta Section")
+    pages = [p1, p2, p3]
+
+    sections = detect_sections(pages)
+
+    assert [s.section_path for s in sections] == [
+        "Alpha Section",
+        "Beta Section",
+        "Gamma Section",
+        "Delta Section",
+    ]
+
+    alpha, beta = sections[0], sections[1]
+    assert alpha.start_page == 1 and alpha.end_page == 1
+    assert beta.start_page == 1 and beta.end_page == 1
+
+    # Each section only contains ITS OWN heading/body, not the other's.
+    assert "alpha body text" in alpha.text
+    assert "beta body text" not in alpha.text
+    assert "beta body text" in beta.text
+    assert "alpha body text" not in beta.text
+
+    # No duplication: the two sections' texts don't overlap, and together
+    # they don't exceed the source page's total length.
+    assert len(alpha.text) + len(beta.text) <= len(p1.text)
+
+    # `pages` still references the full original PageContent (needed for
+    # evidence-location search downstream) even though `text` is sliced.
+    assert alpha.pages == [p1]
+    assert alpha.pages[0] is p1
+    assert beta.pages[0] is p1
+
+
 def test_bold_word_inside_paragraph_is_not_flagged_as_heading():
     # A bold span that shares its line with other non-blank spans (i.e.
     # bold emphasis inside running text) must not count as a heading

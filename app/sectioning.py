@@ -164,25 +164,31 @@ def _layout_mode_sections(pages: list, candidates: list) -> list:
     """Build one Section per heading candidate, from that heading's page
     to just before the next heading's page (or end of document).
 
-    Simplification (documented per spec): a section's page range is
-    computed in whole pages, not sub-page text slices. If a heading
-    starts mid-page, that entire page's text is included in the
-    section's ``text`` rather than slicing out only the text after the
-    heading -- precise sub-page positioning is still available downstream
-    via ``pages[*].spans`` char_offsets, which is where evidence-location
-    precision actually needs to live, not here.
-
-    Known consequence of that simplification: if two heading candidates
-    land on the very same page, that page's whole text is included in
-    both of their sections (there is no sub-page boundary between them).
-    This is rare in practice and acceptable at this granularity.
+    A section's page RANGE is still computed in whole pages -- precise
+    sub-page positioning for evidence-location purposes lives downstream,
+    via ``pages[*].spans`` char_offsets, not here. But a section's *first*
+    page is sliced starting at its own heading's char_offset, and stops at
+    the next heading's char_offset when that next heading lands on the
+    SAME page. Real documents make "two headings on one page" the common
+    case, not the rare one -- a dense summary/TOC page can carry five or
+    more short sub-headings -- and without this slice, every one of those
+    headings' sections would carry a full duplicate copy of that entire
+    page's text, multiplying both LLM cost and duplicate-extracted facts
+    (observed directly on a real prospectus: 5 sections sharing one page,
+    each carrying that page's full ~4,000 characters -- a 3.6x content
+    amplification across the whole document before this fix). Every page
+    AFTER a section's first page is guaranteed (by the end_index
+    computation below) not to contain another heading before this
+    section's boundary, so those pages are used in full, unsliced.
     """
     sections: list[Section] = []
     n = len(candidates)
 
     for i, (list_index, span) in enumerate(candidates):
+        next_index: int | None = None
+        next_span: Span | None = None
         if i + 1 < n:
-            next_index = candidates[i + 1][0]
+            next_index, next_span = candidates[i + 1]
             # -1 because the next heading's page belongs to the next
             # section; max(...) guards the same-page case (next_index-1
             # would be < list_index) so this section still gets its own
@@ -192,10 +198,23 @@ def _layout_mode_sections(pages: list, candidates: list) -> list:
             end_index = len(pages) - 1
 
         section_pages = pages[list_index : end_index + 1]
+        first_page = section_pages[0]
+
+        if next_index == list_index:
+            # Next heading shares this same page -- stop this section's
+            # slice of the page right where the next heading begins, so
+            # the two sections partition the page instead of both
+            # claiming all of it.
+            first_page_text = first_page.text[span.char_offset : next_span.char_offset]
+        else:
+            first_page_text = first_page.text[span.char_offset :]
+
+        text = "\n\n".join([first_page_text] + [p.text for p in section_pages[1:]])
+
         sections.append(
             Section(
                 section_path=span.text.strip(),
-                text="\n\n".join(p.text for p in section_pages),
+                text=text,
                 start_page=section_pages[0].page_number,
                 end_page=section_pages[-1].page_number,
                 pages=section_pages,
