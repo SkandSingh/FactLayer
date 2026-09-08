@@ -9,8 +9,9 @@ Built for the Superjoin VIT 2026 Engineering Intern hiring assignment.
 
 ## Setup and Run Instructions
 
-Requires Python 3.11+ and a [Gemini API key](https://aistudio.google.com/apikey)
-(the app uses `gemini-2.5-flash` by default — it has a workable free tier).
+Requires Python 3.11+ and at least one [Gemini API key](https://aistudio.google.com/apikey)
+(the app uses `gemini-3.5-flash` by default — it has a workable free tier,
+though a fresh free-tier key can be capped as low as 5 requests/minute).
 
 ```bash
 python3 -m venv .venv
@@ -19,13 +20,27 @@ pip install -r requirements.txt
 
 cp .env.example .env
 # then edit .env and set GEMINI_API_KEY=your-key-here
+```
 
+**Multiple keys / providers (recommended):** every LLM call round-robins
+across every key you configure, so each additional key adds its own
+rate-limit budget to the pool — this is what actually fixes rate-limit
+stalls, not just retries. In `.env`:
+```bash
+GEMINI_API_KEYS=key1,key2
+GROK_API_KEYS=key1,key2   # optional, xAI's Grok — same LLMClient interface
+```
+(`GEMINI_API_KEY`, singular, still works as a one-key shorthand.)
+
+```bash
 uvicorn app.main:app --reload
 ```
 
 The app is now running at `http://localhost:8000`:
 
 - `http://localhost:8000/ui` — the fact browser (upload results show up here)
+- `http://localhost:8000/ui/ask` — ask a question in plain English, see the
+  matching facts across every uploaded document and how they relate
 - `http://localhost:8000/docs` — interactive API docs (Swagger UI) — the
   easiest way to upload a PDF via `POST /documents`
 - `http://localhost:8000/health` — health check
@@ -34,7 +49,16 @@ To upload a PDF from the command line instead:
 
 ```bash
 curl -X POST http://localhost:8000/documents -F "file=@/path/to/your.pdf"
+
+# or several at once — each is compared against the whole existing store,
+# including the others in this same batch, as they're processed in order:
+curl -X POST http://localhost:8000/documents/batch \
+  -F "files=@one.pdf" -F "files=@two.pdf" -F "files=@three.pdf"
 ```
+
+`GET /stats` gives the running totals (documents, facts, relationships,
+broken down by corroborates/contradicts/reconciled_context) across
+everything ingested so far.
 
 Run the test suite with:
 
@@ -66,10 +90,15 @@ PDF ──▶ parse ──▶ section ──▶ extract (LLM) ──▶ normaliz
 ```
 
 1. **Parse** (`app/pdf_ingest.py`) — PyMuPDF reads each page's text plus
-   per-span layout metadata (font size, bold, bbox). Every span carries a
-   pointer back to `(page_number, char_offset)` into that page's plain
-   text — this is the entire evidence story, captured at parse time rather
-   than reconstructed later by re-searching the PDF.
+   per-span layout metadata (font size, bold, bbox). Detected tables
+   (`page.find_tables()`) are serialized as markdown tables in place of
+   their raw flattened cell text, so row/column alignment survives into
+   what the LLM reads — a plain span-by-position flatten scrambles which
+   number belongs to which row label, which matters a lot for financial
+   statements. Every span (table or not) carries a pointer back to
+   `(page_number, char_offset)` into that page's plain text — this is the
+   entire evidence story, captured at parse time rather than reconstructed
+   later by re-searching the PDF.
 
 2. **Section** (`app/sectioning.py`) — detects heading boundaries from
    generic layout signals (a span notably larger or bolder than the
@@ -77,15 +106,21 @@ PDF ──▶ parse ──▶ section ──▶ extract (LLM) ──▶ normaliz
    generalizes to PDFs it's never seen. Falls back to fixed ~10-page
    groups when a document has no detectable heading structure at all.
 
-3. **Extract** (`app/extraction.py`, `app/llm/prompts.py`) — one LLM call
-   per section, run with bounded concurrency (`MAX_CONCURRENT_LLM_CALLS`).
-   The prompt asks for a JSON array of facts with an open-ended `attribute`
-   label the model invents per document, rather than a fixed enum — this
-   is what lets the schema evolve as new kinds of documents come in. Each
-   returned `verbatim_quote` is then re-located inside the section's
-   source pages to pin down the exact page and character offset, so every
-   fact keeps a hard link back to its evidence even though the LLM only
-   saw a text blob, not page/offset coordinates.
+3. **Extract** (`app/extraction.py`, `app/llm/prompts.py`) — sections are
+   greedily packed into batches (multiple sections per prompt, each tagged
+   by name, up to `MAX_BATCH_CHARS`) so one large document costs a handful
+   of LLM calls rather than one per section — the single biggest lever on
+   both speed and rate-limit exposure. Batches run with bounded concurrency
+   (`MAX_CONCURRENT_LLM_CALLS`) against a round-robin pool of every
+   configured Gemini/Grok key (`app/llm/pool.py`, `app/llm/factory.py`) —
+   each additional key adds its own quota to the pool instead of sharing
+   one. The prompt asks for a JSON array of facts with an open-ended
+   `attribute` label the model invents per document, rather than a fixed
+   enum — this is what lets the schema evolve as new kinds of documents
+   come in. Each returned `verbatim_quote` is then re-located inside its
+   section's source pages to pin down the exact page and character offset,
+   so every fact keeps a hard link back to its evidence even though the
+   LLM only saw a text blob, not page/offset coordinates.
 
 4. **Normalize** (`app/normalization.py`) — plain Python, no LLM call: unit
    conversion (Cr/Lakh/Million/Billion, Indian comma grouping, parenthesized
@@ -114,12 +149,26 @@ PDF ──▶ parse ──▶ section ──▶ extract (LLM) ──▶ normaliz
 6. **Store, API, UI** — SQLite (`documents`, `facts`, `relationships`
    tables) only ever grows; new uploads are compared against the whole
    existing store and never re-derive anything already settled. FastAPI
-   exposes `POST /documents` (upload, runs the full pipeline synchronously)
-   and `GET`/`GET .../{id}` for both `facts` and `relationships`, each
-   detail view returning the full evidence payload. A small
-   server-rendered UI (`/ui`, Jinja2, no frontend build step) gives a fact
-   browser, a fact detail page (evidence quote front and center), and a
-   relationship detail page showing both pieces of evidence side by side.
+   exposes `POST /documents` and `POST /documents/batch` (upload one or
+   several PDFs, runs the full pipeline synchronously) and `GET`/
+   `GET .../{id}` for both `facts` and `relationships`, each detail view
+   returning the full evidence payload, plus `GET /stats` for running
+   totals and `POST /ask` for retrieval-only question-answering over the
+   whole store (see below). A server-rendered UI (`/ui`, Jinja2, no
+   frontend build step) gives a fact browser, a fact detail page (evidence
+   quote front and center), a relationship detail page showing both pieces
+   of evidence side by side, and an `/ui/ask` search page.
+
+7. **Ask** (`app/routes/ask.py`) — a natural-language question against
+   `/ask` or `/ui/ask` is scored against every stored fact's `entity_name`
+   (highest weight), `attribute`, and `verbatim_quote` (keyword overlap
+   plus a fuzzy-name boost for close-but-not-exact entity wording), and
+   the top matches are returned with their source document and their
+   relationships — so one question can surface facts from several
+   different PDFs side by side, with the reasoning for how they relate
+   already attached. Deliberately **no LLM call**: it's pure retrieval, so
+   it's instant, free, and can't hallucinate an answer that isn't actually
+   in the store.
 
 ### Key decisions and trade-offs
 
@@ -160,17 +209,26 @@ AI-generated code was not committed unreviewed.
 
 ## Limitations and Next Steps
 
-- **Not yet run against the real starter dataset.** This development
-  environment has no `GEMINI_API_KEY` and doesn't have the actual starter
-  PDFs (Delhivery filings, RBI/IMF reports) available locally, so the
-  pipeline is fully built and unit/integration-tested against synthetic
-  fixtures and fake LLM clients, but hasn't yet produced a real run's
-  output for the four required cases. **Next step before submission:** run
-  it against the real starter dataset with a real API key, and swap in
-  whatever the system actually surfaces for the four required cases in the
-  demo video (see `docs/FOUR_REQUIRED_CASES.md`, kept out of this repo, for
-  the hand-verified target examples used to validate the design while
+- **Not yet run against the real starter dataset.** The pipeline is fully
+  built and unit/integration-tested against synthetic fixtures and fake
+  LLM clients, but hasn't yet produced a real run's output for the four
+  required cases. **Next step before submission:** run it against the real
+  starter dataset with real API keys, and swap in whatever the system
+  actually surfaces for the four required cases in the demo video (see
+  `docs/FOUR_REQUIRED_CASES.md`, kept out of this repo, for the
+  hand-verified target examples used to validate the design while
   building).
+- **A single free-tier key is genuinely rate-limited.** One Gemini
+  free-tier key was observed capped at 5 requests/minute during
+  development — the multi-key round-robin pool and section-batching (see
+  Approach) are the two mitigations built for this, but if you're running
+  with only one key and a large document, expect it to still take a
+  while; add more keys (any mix of Gemini/Grok) to widen the pool.
+- **`/ask` is keyword/fuzzy retrieval, not semantic search.** It won't
+  reliably answer a question phrased with no words in common with the
+  underlying facts (e.g. a synonym the extraction never used). Embeddings
+  would generalize this further; not built, since it's the same "not at
+  this scale yet" trade-off as the comparison prefilter below.
 - **Comparison doesn't scale past a handful of documents yet.** The
   comparison step sends a full digest of prefiltered candidates into one
   LLM call — fine at prototype scale (a few documents, a few hundred
@@ -204,7 +262,8 @@ AI-generated code was not committed unreviewed.
   hand-verified target examples for the four required cases) is kept out
   of this repository intentionally — it's build reference, not submission
   content — but informed every design decision described above.
-- 98 automated tests cover every module (PDF parsing, sectioning,
-  normalization, matching, extraction, comparison, and all API/UI routes),
-  each using fixtures or fake LLM clients rather than live network calls,
-  so the suite runs offline and deterministically.
+- 138 automated tests cover every module (PDF parsing and table detection,
+  sectioning, normalization, matching, batched extraction, comparison, the
+  LLM pool/round-robin, and all API/UI routes), each using fixtures or
+  fake LLM clients rather than live network calls, so the suite runs
+  offline and deterministically.
