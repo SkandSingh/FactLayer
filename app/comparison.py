@@ -47,15 +47,13 @@ _VALID_RELATION_TYPES = {"corroborates", "contradicts", "reconciled_context"}
 _MIN_DIGEST_SIZE = 2
 
 # Upper bound (JSON-serialized characters) on one comparison call's digest.
-# Observed directly on real data: a single document with ~2,300 facts
-# produced a digest large enough to blow every pooled provider's per-minute
-# input-token quota, so the ENTIRE comparison call failed and the document
-# got zero relationships -- not because nothing was related, but because
-# the one giant call never had a chance to succeed. Chunking the candidate
-# set (see `_chunk_candidates`) keeps each call's digest to a size that
-# reliably fits within free-tier provider quotas, at the cost of the new
-# document's own facts being resent in every chunk (harmless overhead,
-# deduped by `compare_new_document_facts` before insert).
+# Observed directly on real data: a single document with ~2,300 facts of
+# ITS OWN produced a digest large enough to blow every pooled provider's
+# per-minute input-token quota, so the ENTIRE comparison call failed and
+# the document got zero relationships -- not because nothing was related,
+# but because the one giant call never had a chance to succeed. Note this
+# means `new_facts` alone can already exceed this budget; chunking must
+# cover `new_facts`, not just the candidate set (see `_chunk_digest`).
 MAX_DIGEST_CHARS = 10000
 
 
@@ -100,30 +98,78 @@ def _collect_candidates(new_facts: list, existing_facts: list) -> list:
     return list(deduped.values())
 
 
-def _chunk_candidates(new_facts: list, candidates: list, max_chars: int) -> list:
-    """Split `candidates` into groups such that `new_facts + group`,
-    JSON-serialized, stays under `max_chars` per group.
+def _chunk_digest(new_facts: list, candidates: list, max_chars: int) -> list:
+    """Split the comparison pool into digest-sized groups (each group is a
+    complete `list[Fact]` ready to serialize and send as one call).
 
-    `new_facts` are NOT chunked -- every chunk carries the full new-facts
-    set (so within-new-document consistency is still checked in every
-    call) plus as many candidates as fit. Always yields at least one
-    chunk (possibly with zero candidates) so a document with no
-    candidates at all still gets its own facts checked against each
-    other.
+    Two regimes, chosen by whether `new_facts` alone fits the budget:
+
+    * **Common case -- `new_facts` fits in `max_chars` on its own**
+      (true for almost every upload: a document contributes some new
+      facts, checked against a potentially much larger existing store).
+      `new_facts` is repeated in full in every chunk, each paired with a
+      different slice of `candidates`. This is thorough -- every new fact
+      is compared against every candidate, just spread across multiple
+      calls -- and cheap, since `new_facts` is the small side here.
+
+    * **Fallback -- `new_facts` itself exceeds `max_chars`** (observed
+      directly on real data: one document had ~2,300 facts of its own).
+      Repeating an already-oversized list in full per chunk is impossible.
+      `new_facts` and `candidates` are interleaved into one pool and THAT
+      pool is chunked, so most chunks still carry a mix of both. This is
+      best-effort, not exhaustive: two facts landing in different chunks
+      aren't directly compared in this pass (though they may still be
+      compared later, when a subsequent document's own comparison pass
+      pulls both in as candidates). Exhaustive pairing here would need
+      `len(new_chunks) * len(candidate_chunks)` calls -- thousands, for a
+      document this large -- trading one scaling problem for a worse one.
+      This mirrors the same "batch what fits, accept partial coverage
+      over a call that can never succeed" trade-off `app.extraction`
+      already makes for oversized documents.
     """
-    base_size = len(json.dumps([_fact_to_digest_dict(f) for f in new_facts]))
-    chunks: list[list] = []
-    current: list = []
-    current_size = base_size
+    new_facts_size = len(json.dumps([_fact_to_digest_dict(f) for f in new_facts]))
 
-    for candidate in candidates:
-        candidate_size = len(json.dumps(_fact_to_digest_dict(candidate)))
-        if current and current_size + candidate_size > max_chars:
+    if new_facts_size < max_chars:
+        chunks: list[list] = []
+        current: list = []
+        current_size = new_facts_size
+
+        for candidate in candidates:
+            candidate_size = len(json.dumps(_fact_to_digest_dict(candidate)))
+            if current and current_size + candidate_size > max_chars:
+                chunks.append(list(new_facts) + current)
+                current = []
+                current_size = new_facts_size
+            current.append(candidate)
+            current_size += candidate_size
+
+        if current or not chunks:
+            chunks.append(list(new_facts) + current)
+
+        return chunks
+
+    interleaved: list = []
+    i = j = 0
+    while i < len(new_facts) or j < len(candidates):
+        if i < len(new_facts):
+            interleaved.append(new_facts[i])
+            i += 1
+        if j < len(candidates):
+            interleaved.append(candidates[j])
+            j += 1
+
+    chunks = []
+    current = []
+    current_size = 0
+
+    for fact in interleaved:
+        fact_size = len(json.dumps(_fact_to_digest_dict(fact)))
+        if current and current_size + fact_size > max_chars:
             chunks.append(current)
             current = []
-            current_size = base_size
-        current.append(candidate)
-        current_size += candidate_size
+            current_size = 0
+        current.append(fact)
+        current_size += fact_size
 
     if current or not chunks:
         chunks.append(current)
@@ -238,9 +284,9 @@ async def compare_new_document_facts(new_facts: list, llm_client) -> List[Relati
 
     Never raises: any LLM call failure or malformed response degrades that
     one chunk to zero relationships rather than propagating -- and, since
-    the digest is chunked (see `_chunk_candidates`), one chunk's failure
-    no longer costs the WHOLE document its comparison pass the way a
-    single oversized call used to (observed directly on real data: one
+    the digest is chunked (see `_chunk_digest`), one chunk's failure no
+    longer costs the WHOLE document its comparison pass the way a single
+    oversized call used to (observed directly on real data: one
     document's full-digest call blew every pooled provider's token quota
     and the document got zero relationships even though it plausibly had
     real ones).
@@ -254,16 +300,15 @@ async def compare_new_document_facts(new_facts: list, llm_client) -> List[Relati
     if len(new_facts) + len(candidates) < _MIN_DIGEST_SIZE:
         return []
 
-    chunks = _chunk_candidates(new_facts, candidates, MAX_DIGEST_CHARS)
+    chunks = _chunk_digest(new_facts, candidates, MAX_DIGEST_CHARS)
 
-    # Every chunk resends the full `new_facts` set, so a relationship
-    # between two new facts could be independently (re)found in more than
-    # one chunk -- dedupe by the unordered fact-id pair before inserting.
+    # A given fact pair is only found once (each chunk is a disjoint
+    # subset), but dedupe anyway -- cheap, and guards against the LLM
+    # itself ever reporting the same pair twice within one response.
     seen_pairs: set = set()
     inserted: List[Relationship] = []
 
-    for chunk_candidates in chunks:
-        digest_facts = list(new_facts) + chunk_candidates
+    for digest_facts in chunks:
         if len(digest_facts) < _MIN_DIGEST_SIZE:
             continue
 

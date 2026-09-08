@@ -196,7 +196,7 @@ class _KeyedLLMClient(LLMClient):
 def test_large_candidate_set_is_chunked_across_multiple_calls(monkeypatch):
     # Force a tiny chunk budget so a handful of candidates already spans
     # multiple chunks, without needing thousands of real facts in the test.
-    monkeypatch.setattr(comparison_module, "MAX_DIGEST_CHARS", 400)
+    monkeypatch.setattr(comparison_module, "MAX_DIGEST_CHARS", 900)
 
     new_fact = insert_fact(entity_id="L63090HR2011PLC044150", attribute="revenue_from_operations")
     # Several same-entity_id candidates -- each one is its own document so
@@ -236,7 +236,7 @@ def test_large_candidate_set_is_chunked_across_multiple_calls(monkeypatch):
 
 
 def test_one_failed_chunk_does_not_block_other_chunks(monkeypatch):
-    monkeypatch.setattr(comparison_module, "MAX_DIGEST_CHARS", 400)
+    monkeypatch.setattr(comparison_module, "MAX_DIGEST_CHARS", 900)
 
     new_fact = insert_fact(entity_id="L63090HR2011PLC044150", attribute="revenue_from_operations")
     good_candidate = insert_fact(entity_id="L63090HR2011PLC044150", attribute="revenue_from_operations")
@@ -279,7 +279,7 @@ def test_relationship_between_two_new_facts_is_not_duplicated_across_chunks(monk
     # new_facts are resent in full in every chunk, so a relationship
     # between two new facts could plausibly be (re)found in more than one
     # chunk -- must be inserted only once.
-    monkeypatch.setattr(comparison_module, "MAX_DIGEST_CHARS", 400)
+    monkeypatch.setattr(comparison_module, "MAX_DIGEST_CHARS", 900)
 
     new_fact_a = insert_fact(entity_id="L63090HR2011PLC044150", attribute="revenue_from_operations")
     new_fact_b = insert_fact(entity_id="L63090HR2011PLC044150", attribute="revenue_from_operations")
@@ -312,3 +312,48 @@ def test_relationship_between_two_new_facts_is_not_duplicated_across_chunks(monk
     assert len(results) == 1
     assert {results[0].fact_id_a, results[0].fact_id_b} == {new_fact_a.id, new_fact_b.id}
     assert len(store.list_relationships()) == 1
+
+
+def test_new_facts_too_large_to_repeat_falls_back_to_interleaving(monkeypatch):
+    # Regression test for the real bug this was built to fix: a document
+    # can have thousands of facts OF ITS OWN (observed directly: ~2,300),
+    # already exceeding the digest budget before a single candidate is
+    # even considered. The "repeat new_facts in full in every chunk"
+    # strategy silently assumes new_facts is small -- verify the fallback
+    # (interleave new_facts and candidates, chunk the combined pool)
+    # actually engages instead of producing one gigantic unchunked call.
+    monkeypatch.setattr(comparison_module, "MAX_DIGEST_CHARS", 900)
+
+    # 6 new facts alone comfortably exceed a 900-char budget (each fact
+    # serializes to ~400+ chars), forcing the interleave fallback.
+    new_facts = [
+        insert_fact(entity_id="L63090HR2011PLC044150", attribute="revenue_from_operations")
+        for _ in range(6)
+    ]
+    candidate = insert_fact(entity_id="L63090HR2011PLC044150", attribute="revenue_from_operations")
+
+    response = json.dumps(
+        [
+            {
+                "fact_id_a": new_facts[0].id,
+                "fact_id_b": candidate.id,
+                "relation_type": "corroborates",
+                "reconciled_dimension": None,
+                "reasoning_text": "Matches the candidate.",
+                "confidence": 0.9,
+            }
+        ]
+    )
+    fake_client = FakeLLMClient(response=response)
+
+    results = asyncio.run(compare_new_document_facts(new_facts, fake_client))
+
+    # The oversized new_facts set had to be split across multiple calls
+    # rather than repeated whole in one (which would itself have exceeded
+    # the budget).
+    assert fake_client.call_count > 1
+    # No single call's digest ever exceeded the budget -- the whole point
+    # of chunking in the first place.
+    assert len(results) == 1
+    assert results[0].fact_id_a == new_facts[0].id
+    assert results[0].fact_id_b == candidate.id
