@@ -46,6 +46,18 @@ _VALID_RELATION_TYPES = {"corroborates", "contradicts", "reconciled_context"}
 # is skipped entirely.
 _MIN_DIGEST_SIZE = 2
 
+# Upper bound (JSON-serialized characters) on one comparison call's digest.
+# Observed directly on real data: a single document with ~2,300 facts
+# produced a digest large enough to blow every pooled provider's per-minute
+# input-token quota, so the ENTIRE comparison call failed and the document
+# got zero relationships -- not because nothing was related, but because
+# the one giant call never had a chance to succeed. Chunking the candidate
+# set (see `_chunk_candidates`) keeps each call's digest to a size that
+# reliably fits within free-tier provider quotas, at the cost of the new
+# document's own facts being resent in every chunk (harmless overhead,
+# deduped by `compare_new_document_facts` before insert).
+MAX_DIGEST_CHARS = 10000
+
 
 def _strip_code_fences(text: str) -> str:
     """Strip a single leading/trailing markdown code fence, if present."""
@@ -71,10 +83,11 @@ def _fact_to_digest_dict(fact) -> dict:
     }
 
 
-def _collect_digest_facts(new_facts: list, existing_facts: list) -> list:
+def _collect_candidates(new_facts: list, existing_facts: list) -> list:
     """Union candidate sets across all new facts, deduped by id, excluding
     anything already among the new facts themselves (those are added to
-    the digest separately by the caller, so this avoids double-counting).
+    every chunk's digest separately by the caller, so this avoids
+    double-counting).
     """
     new_ids = {f.id for f in new_facts}
     deduped: dict = {}
@@ -84,7 +97,38 @@ def _collect_digest_facts(new_facts: list, existing_facts: list) -> list:
             if candidate_id is None or candidate_id in new_ids:
                 continue
             deduped.setdefault(candidate_id, candidate)
-    return list(new_facts) + list(deduped.values())
+    return list(deduped.values())
+
+
+def _chunk_candidates(new_facts: list, candidates: list, max_chars: int) -> list:
+    """Split `candidates` into groups such that `new_facts + group`,
+    JSON-serialized, stays under `max_chars` per group.
+
+    `new_facts` are NOT chunked -- every chunk carries the full new-facts
+    set (so within-new-document consistency is still checked in every
+    call) plus as many candidates as fit. Always yields at least one
+    chunk (possibly with zero candidates) so a document with no
+    candidates at all still gets its own facts checked against each
+    other.
+    """
+    base_size = len(json.dumps([_fact_to_digest_dict(f) for f in new_facts]))
+    chunks: list[list] = []
+    current: list = []
+    current_size = base_size
+
+    for candidate in candidates:
+        candidate_size = len(json.dumps(_fact_to_digest_dict(candidate)))
+        if current and current_size + candidate_size > max_chars:
+            chunks.append(current)
+            current = []
+            current_size = base_size
+        current.append(candidate)
+        current_size += candidate_size
+
+    if current or not chunks:
+        chunks.append(current)
+
+    return chunks
 
 
 def _parse_relationship_items(raw_response: str) -> list:
@@ -192,49 +236,77 @@ async def compare_new_document_facts(new_facts: list, llm_client) -> List[Relati
         compare, the LLM call failed, the response was unparseable, or
         every candidate relationship failed validation.
 
-    Never raises: any LLM call failure or malformed response degrades to
-    an empty result rather than propagating, so a failed comparison step
-    doesn't break the upload flow that runs it.
+    Never raises: any LLM call failure or malformed response degrades that
+    one chunk to zero relationships rather than propagating -- and, since
+    the digest is chunked (see `_chunk_candidates`), one chunk's failure
+    no longer costs the WHOLE document its comparison pass the way a
+    single oversized call used to (observed directly on real data: one
+    document's full-digest call blew every pooled provider's token quota
+    and the document got zero relationships even though it plausibly had
+    real ones).
     """
     if not new_facts:
         return []
 
     existing_facts = store.get_all_facts()
-    digest_facts = _collect_digest_facts(new_facts, existing_facts)
+    candidates = _collect_candidates(new_facts, existing_facts)
 
-    if len(digest_facts) < _MIN_DIGEST_SIZE:
+    if len(new_facts) + len(candidates) < _MIN_DIGEST_SIZE:
         return []
 
-    digest_json = json.dumps([_fact_to_digest_dict(f) for f in digest_facts])
-    prompt = build_comparison_prompt(digest_json)
+    chunks = _chunk_candidates(new_facts, candidates, MAX_DIGEST_CHARS)
 
-    try:
-        raw_response = await llm_client.generate(prompt)
-    except Exception as exc:  # noqa: BLE001 - deliberately broad: any provider/network failure
-        logger.warning("Comparison: LLM call failed: %s", exc)
-        return []
-
-    items = _parse_relationship_items(raw_response)
-    if not items:
-        return []
-
-    valid_ids = {f.id for f in digest_facts}
-
+    # Every chunk resends the full `new_facts` set, so a relationship
+    # between two new facts could be independently (re)found in more than
+    # one chunk -- dedupe by the unordered fact-id pair before inserting.
+    seen_pairs: set = set()
     inserted: List[Relationship] = []
-    for item in items:
-        validated = _validate_relationship_item(item, valid_ids)
-        if validated is None:
+
+    for chunk_candidates in chunks:
+        digest_facts = list(new_facts) + chunk_candidates
+        if len(digest_facts) < _MIN_DIGEST_SIZE:
             continue
-        relationship_id = store.insert_relationship(
-            fact_id_a=validated["fact_id_a"],
-            fact_id_b=validated["fact_id_b"],
-            relation_type=validated["relation_type"],
-            reconciled_dimension=validated["reconciled_dimension"],
-            reasoning_text=validated["reasoning_text"],
-            confidence=validated["confidence"],
-        )
-        relationship = store.get_relationship(relationship_id)
-        if relationship is not None:
-            inserted.append(relationship)
+
+        digest_json = json.dumps([_fact_to_digest_dict(f) for f in digest_facts])
+        prompt = build_comparison_prompt(digest_json)
+
+        try:
+            raw_response = await llm_client.generate(prompt)
+        except Exception as exc:  # noqa: BLE001 - deliberately broad: any provider/network failure
+            logger.warning(
+                "Comparison: LLM call failed for one digest chunk (%d facts); "
+                "skipping this chunk, other chunks still proceed: %s",
+                len(digest_facts),
+                exc,
+            )
+            continue
+
+        items = _parse_relationship_items(raw_response)
+        if not items:
+            continue
+
+        valid_ids = {f.id for f in digest_facts}
+
+        for item in items:
+            validated = _validate_relationship_item(item, valid_ids)
+            if validated is None:
+                continue
+
+            pair_key = tuple(sorted((validated["fact_id_a"], validated["fact_id_b"])))
+            if pair_key in seen_pairs:
+                continue
+            seen_pairs.add(pair_key)
+
+            relationship_id = store.insert_relationship(
+                fact_id_a=validated["fact_id_a"],
+                fact_id_b=validated["fact_id_b"],
+                relation_type=validated["relation_type"],
+                reconciled_dimension=validated["reconciled_dimension"],
+                reasoning_text=validated["reasoning_text"],
+                confidence=validated["confidence"],
+            )
+            relationship = store.get_relationship(relationship_id)
+            if relationship is not None:
+                inserted.append(relationship)
 
     return inserted

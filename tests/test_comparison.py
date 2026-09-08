@@ -19,6 +19,7 @@ from app import config, store
 from app.comparison import compare_new_document_facts
 from app.llm.base import LLMClient
 from app.models import ExtractedFact, TimeScope
+from app import comparison as comparison_module
 
 
 @pytest.fixture(autouse=True)
@@ -171,3 +172,143 @@ def test_malformed_json_response_returns_empty_list_without_raising():
     assert fake_client.call_count == 1
     assert results == []
     assert store.list_relationships() == []
+
+
+class _KeyedLLMClient(LLMClient):
+    """Test double whose response depends on which fact ids appear in the
+    prompt it received -- lets a test assert distinct chunks got distinct
+    (correctly-scoped) digests, the same pattern tests/test_extraction.py
+    uses for its multi-batch coverage."""
+
+    def __init__(self, responses_by_marker: dict):
+        # {marker_substring: canned_json_response}
+        self._responses_by_marker = responses_by_marker
+        self.prompts_received: list = []
+
+    async def generate(self, prompt: str) -> str:
+        self.prompts_received.append(prompt)
+        for marker, response in self._responses_by_marker.items():
+            if marker in prompt:
+                return response
+        raise AssertionError(f"no canned response matched this prompt: {prompt[:200]}")
+
+
+def test_large_candidate_set_is_chunked_across_multiple_calls(monkeypatch):
+    # Force a tiny chunk budget so a handful of candidates already spans
+    # multiple chunks, without needing thousands of real facts in the test.
+    monkeypatch.setattr(comparison_module, "MAX_DIGEST_CHARS", 400)
+
+    new_fact = insert_fact(entity_id="L63090HR2011PLC044150", attribute="revenue_from_operations")
+    # Several same-entity_id candidates -- each one is its own document so
+    # find_candidates matches all of them via the exact entity_id path.
+    candidates = [
+        insert_fact(entity_id="L63090HR2011PLC044150", attribute="revenue_from_operations")
+        for _ in range(6)
+    ]
+
+    # One canned response per possible candidate id -- whichever chunk a
+    # candidate lands in, the fake client recognizes it by that id's
+    # presence in the prompt and returns a relationship for that pair.
+    responses_by_marker = {
+        f'"id": {c.id}': json.dumps(
+            [
+                {
+                    "fact_id_a": new_fact.id,
+                    "fact_id_b": c.id,
+                    "relation_type": "corroborates",
+                    "reconciled_dimension": None,
+                    "reasoning_text": f"Matches candidate {c.id}.",
+                    "confidence": 0.9,
+                }
+            ]
+        )
+        for c in candidates
+    }
+    fake_client = _KeyedLLMClient(responses_by_marker)
+
+    results = asyncio.run(compare_new_document_facts([new_fact], fake_client))
+
+    # A tiny budget with 6 candidates forces more than one call.
+    assert len(fake_client.prompts_received) > 1
+    # Every candidate still got a relationship recorded despite being
+    # spread across multiple chunked calls.
+    assert {r.fact_id_b for r in results} == {c.id for c in candidates}
+
+
+def test_one_failed_chunk_does_not_block_other_chunks(monkeypatch):
+    monkeypatch.setattr(comparison_module, "MAX_DIGEST_CHARS", 400)
+
+    new_fact = insert_fact(entity_id="L63090HR2011PLC044150", attribute="revenue_from_operations")
+    good_candidate = insert_fact(entity_id="L63090HR2011PLC044150", attribute="revenue_from_operations")
+    bad_candidate = insert_fact(entity_id="L63090HR2011PLC044150", attribute="revenue_from_operations")
+
+    class _OneChunkFailsClient(LLMClient):
+        def __init__(self):
+            self.call_count = 0
+
+        async def generate(self, prompt: str) -> str:
+            self.call_count += 1
+            if f'"id": {bad_candidate.id}' in prompt:
+                raise RuntimeError("simulated provider failure for this chunk")
+            return json.dumps(
+                [
+                    {
+                        "fact_id_a": new_fact.id,
+                        "fact_id_b": good_candidate.id,
+                        "relation_type": "corroborates",
+                        "reconciled_dimension": None,
+                        "reasoning_text": "Matches the good candidate.",
+                        "confidence": 0.9,
+                    }
+                ]
+            )
+
+    fake_client = _OneChunkFailsClient()
+
+    results = asyncio.run(compare_new_document_facts([new_fact], fake_client))
+
+    # The chunk containing bad_candidate failed and was skipped, but the
+    # chunk containing good_candidate still succeeded -- the whole
+    # document's comparison isn't sunk by one bad chunk.
+    assert fake_client.call_count > 1
+    assert len(results) == 1
+    assert results[0].fact_id_b == good_candidate.id
+
+
+def test_relationship_between_two_new_facts_is_not_duplicated_across_chunks(monkeypatch):
+    # new_facts are resent in full in every chunk, so a relationship
+    # between two new facts could plausibly be (re)found in more than one
+    # chunk -- must be inserted only once.
+    monkeypatch.setattr(comparison_module, "MAX_DIGEST_CHARS", 400)
+
+    new_fact_a = insert_fact(entity_id="L63090HR2011PLC044150", attribute="revenue_from_operations")
+    new_fact_b = insert_fact(entity_id="L63090HR2011PLC044150", attribute="revenue_from_operations")
+    # Enough filler candidates (all irrelevant/no-match responses) to force
+    # multiple chunks even though the "real" relationship is only between
+    # the two new facts.
+    fillers = [
+        insert_fact(entity_id="L63090HR2011PLC044150", attribute="revenue_from_operations")
+        for _ in range(4)
+    ]
+
+    same_pair_relationship = json.dumps(
+        [
+            {
+                "fact_id_a": new_fact_a.id,
+                "fact_id_b": new_fact_b.id,
+                "relation_type": "corroborates",
+                "reconciled_dimension": None,
+                "reasoning_text": "Both new facts agree.",
+                "confidence": 0.9,
+            }
+        ]
+    )
+    fake_client = FakeLLMClient(response=same_pair_relationship)
+
+    results = asyncio.run(compare_new_document_facts([new_fact_a, new_fact_b], fake_client))
+
+    assert fake_client.call_count > 1  # confirms multiple chunks actually ran
+    # Despite every chunk "finding" the same pair, it's inserted only once.
+    assert len(results) == 1
+    assert {results[0].fact_id_a, results[0].fact_id_b} == {new_fact_a.id, new_fact_b.id}
+    assert len(store.list_relationships()) == 1
