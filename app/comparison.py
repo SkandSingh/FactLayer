@@ -54,7 +54,15 @@ _MIN_DIGEST_SIZE = 2
 # but because the one giant call never had a chance to succeed. Note this
 # means `new_facts` alone can already exceed this budget; chunking must
 # cover `new_facts`, not just the candidate set (see `_chunk_digest`).
-MAX_DIGEST_CHARS = 10000
+#
+# 25,000 chars is deliberately larger than the smallest pooled provider's
+# comfortable per-call budget (observed: Groq's free tier caps around
+# 8,000 tokens/minute per key, roughly 30,000 chars) -- a chunk this size
+# occasionally overflowing one provider is fine, since `RoundRobinLLMClient`
+# already fails over to the next pooled client on any failure. Sized to
+# cut total call count substantially versus a more conservative budget,
+# while staying well under Gemini's much larger 250,000-token/minute cap.
+MAX_DIGEST_CHARS = 25000
 
 
 def _strip_code_fences(text: str) -> str:
