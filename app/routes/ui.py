@@ -8,11 +8,11 @@ quote + section/page/offset provenance) visible for a demo.
 """
 from typing import Optional
 
-from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.templating import Jinja2Templates
 
-from app import store
-from app.routes.ask import find_relevant_facts
+from app import config, store
+from app.routes.documents import _is_pdf_upload, _process_one_document, get_llm_client
 
 router = APIRouter(prefix="/ui")
 templates = Jinja2Templates(directory="app/templates")
@@ -81,29 +81,67 @@ async def relationship_detail(request: Request, relationship_id: int):
     )
 
 
-@router.get("/ask")
-async def ask_page(request: Request):
+@router.get("/upload")
+async def upload_page(request: Request):
     return templates.TemplateResponse(
         request,
-        "ask.html",
-        {
-            "question": None,
-            "matched_facts": [],
-            "total_matches": None,
-        },
+        "upload.html",
+        {"results": None, "documents_failed": 0},
     )
 
 
-@router.post("/ask")
-async def ask_page_submit(request: Request, question: str = Form(...)):
-    result = find_relevant_facts(question)
+@router.post("/upload")
+async def upload_page_submit(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    llm_client=Depends(get_llm_client),
+):
+    """Browser-facing upload form: accepts one or several PDFs, runs the
+    same pipeline as `POST /documents`/`POST /documents/batch`, and renders
+    a result page instead of returning raw JSON. No new business logic --
+    this reuses `app.routes.documents`'s validation and per-document
+    processing directly so the two entry points can never drift apart.
+    """
+    results = []
+    documents_failed = 0
+
+    for file in files:
+        contents = await file.read()
+
+        if len(contents) > config.UPLOAD_MAX_BYTES:
+            documents_failed += 1
+            results.append(
+                {
+                    "filename": file.filename,
+                    "error": (
+                        f"File too large: {len(contents)} bytes exceeds the "
+                        f"{config.UPLOAD_MAX_BYTES}-byte limit."
+                    ),
+                }
+            )
+            continue
+
+        if not _is_pdf_upload(file):
+            documents_failed += 1
+            results.append(
+                {
+                    "filename": file.filename,
+                    "error": "Uploaded file must be a PDF (.pdf extension or PDF content-type).",
+                }
+            )
+            continue
+
+        try:
+            result = await _process_one_document(contents, file.filename, llm_client)
+        except HTTPException as exc:
+            documents_failed += 1
+            results.append({"filename": file.filename, "error": str(exc.detail)})
+            continue
+
+        results.append(result)
 
     return templates.TemplateResponse(
         request,
-        "ask.html",
-        {
-            "question": question,
-            "matched_facts": result["matched_facts"],
-            "total_matches": result["total_matches"],
-        },
+        "upload.html",
+        {"results": results, "documents_failed": documents_failed},
     )
