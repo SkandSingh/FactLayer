@@ -38,11 +38,12 @@ uvicorn app.main:app --reload
 
 The app is now running at `http://localhost:8000`:
 
-- `http://localhost:8000/ui` — the fact browser (upload results show up here)
-- `http://localhost:8000/ui/ask` — ask a question in plain English, see the
-  matching facts across every uploaded document and how they relate
-- `http://localhost:8000/docs` — interactive API docs (Swagger UI) — the
-  easiest way to upload a PDF via `POST /documents`
+- `http://localhost:8000/ui/upload` — upload one or more PDFs from the
+  browser and see the extraction results
+- `http://localhost:8000/ui` — the fact browser (uploaded documents and
+  their facts show up here)
+- `http://localhost:8000/docs` — interactive API docs (Swagger UI), if you'd
+  rather upload via the API directly
 - `http://localhost:8000/health` — health check
 
 To upload a PDF from the command line instead:
@@ -153,22 +154,10 @@ PDF ──▶ parse ──▶ section ──▶ extract (LLM) ──▶ normaliz
    several PDFs, runs the full pipeline synchronously) and `GET`/
    `GET .../{id}` for both `facts` and `relationships`, each detail view
    returning the full evidence payload, plus `GET /stats` for running
-   totals and `POST /ask` for retrieval-only question-answering over the
-   whole store (see below). A server-rendered UI (`/ui`, Jinja2, no
-   frontend build step) gives a fact browser, a fact detail page (evidence
-   quote front and center), a relationship detail page showing both pieces
-   of evidence side by side, and an `/ui/ask` search page.
-
-7. **Ask** (`app/routes/ask.py`) — a natural-language question against
-   `/ask` or `/ui/ask` is scored against every stored fact's `entity_name`
-   (highest weight), `attribute`, and `verbatim_quote` (keyword overlap
-   plus a fuzzy-name boost for close-but-not-exact entity wording), and
-   the top matches are returned with their source document and their
-   relationships — so one question can surface facts from several
-   different PDFs side by side, with the reasoning for how they relate
-   already attached. Deliberately **no LLM call**: it's pure retrieval, so
-   it's instant, free, and can't hallucinate an answer that isn't actually
-   in the store.
+   totals. A server-rendered UI (`/ui`, Jinja2, no frontend build step)
+   gives a browser-based upload page (`/ui/upload`), a fact browser, a
+   fact detail page (evidence quote front and center), and a relationship
+   detail page showing both pieces of evidence side by side.
 
 ### Key decisions and trade-offs
 
@@ -224,11 +213,6 @@ AI-generated code was not committed unreviewed.
   Approach) are the two mitigations built for this, but if you're running
   with only one key and a large document, expect it to still take a
   while; add more keys (any mix of Gemini/Groq) to widen the pool.
-- **`/ask` is keyword/fuzzy retrieval, not semantic search.** It won't
-  reliably answer a question phrased with no words in common with the
-  underlying facts (e.g. a synonym the extraction never used). Embeddings
-  would generalize this further; not built, since it's the same "not at
-  this scale yet" trade-off as the comparison prefilter below.
 - **Comparison doesn't scale past a handful of documents yet.** The
   comparison step sends a full digest of prefiltered candidates into one
   LLM call — fine at prototype scale (a few documents, a few hundred
