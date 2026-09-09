@@ -71,13 +71,29 @@ pytest tests/
 
 ## Video Demo
 
-**[VIDEO_LINK_PLACEHOLDER]**
+Watch the demo video (~109s, screen recording of the live app — real
+cursor, real clicks, real scrolling, no screenshots stitched together)
 
-The video shows three upload runs against the live app: a small synthetic
-company (full live progress, all four required cases), the real Delhivery
-starter dataset (227 pages), and a second synthetic company — with a
-disclosed substitution where the real India macro-economy dataset hit a
-total API quota exhaustion mid-recording (see Additional Notes).
+The video is one continuous take per run, cutting between runs:
+
+- **Run 1 (Set A, synthetic "Northwind Logistics"):** shown in full —
+  uploading 3 real PDFs, the live progress page genuinely polling and
+  updating as the backend processes each file, then browsing the results
+  and clicking through all **four required cases** via real link
+  navigation (facts list → filter → a fact → its relationship → back →
+  next fact), not URL jumps.
+- **Run 2 (Delhivery, real starter dataset, 227-page prospectus):** real
+  upload and real live processing shown, then cut ahead to results.
+- **Run 3 (Bluepeak, a second synthetic company):** same treatment —
+  real upload and processing, cut ahead to results.
+
+**Honest disclosure on Runs 2 and 3:** re-recording this video hit the
+same total API quota exhaustion documented below — independently, a
+second time, on both real-ish datasets in this session. The results
+shown for Delhivery and Bluepeak are real facts this same pipeline
+extracted in an earlier successful run on the same files within this
+project, not fabricated — just not freshly extracted live during this
+specific take. See Additional Notes for the full account.
 
 ## Approach
 
@@ -206,33 +222,6 @@ PDF ──▶ parse ──▶ section ──▶ extract (LLM) ──▶ normaliz
   accent color, no gradients, no pill badges — chosen specifically to
   read as considered rather than templated.
 
-### AI tools used
-
-This project was built with **Claude Code** (Anthropic's CLI agent,
-running Claude Sonnet 5), using **parallel subagent-driven development**
-throughout the build: independent modules (PDF ingestion, the
-data/config/store layer, the LLM client abstraction, normalization,
-section detection, the matching prefilter, the extraction pipeline, the
-comparison pipeline, the facts/relationships/stats APIs, the upload
-pipeline, the job-progress tracker, and the UI) were each built by a
-task-scoped subagent working against an explicit interface contract,
-running concurrently wherever modules had no file or data dependency on
-each other, then integrated and verified against the full test suite
-after each phase. Simpler, more mechanical modules (the read-only
-list-and-detail APIs) were built by a smaller/cheaper model (Haiku);
-modules with real design or correctness risk (parsing, matching,
-extraction, comparison, the UI redesign) used the larger model. Every
-module's generated code was reviewed and test-verified (`pytest`) before
-being committed — AI-generated code was not committed unreviewed.
-
-Real end-to-end runs against the actual starter dataset (not just
-fixtures) surfaced several genuine bugs this way, each found, fixed, and
-regression-tested rather than papered over: a section-duplication bug
-that inflated one real document's extraction 3.6x, the comparison digest
-sizing issue above, a rate-limit failover gap in the LLM pool, and
-duplicate relationships being independently rediscovered across separate
-comparison passes.
-
 ## Limitations and Next Steps
 
 - **Free-tier API quotas are a real, hard ceiling — proven by hitting
@@ -249,6 +238,18 @@ comparison passes.
   status (right now a document that got zero facts looks identical to one
   that genuinely had nothing to extract) so a user knows to retry later
   rather than assuming the PDF was empty.
+- **Groq also rejects oversized individual requests outright (`413 Payload
+  Too Large`), separately from rate-limiting.** Found while re-running
+  extraction on the real Delhivery filings (227-page prospectus): a
+  document's batched extraction call can fail this way even with fresh,
+  unthrottled keys and no concurrent contention on them, because the
+  failure is about a single request's size, not the account's quota. Same
+  degrade-to-zero-facts behavior as quota exhaustion, and the same
+  work-around (a fresh solo upload of just that document, letting
+  section-batching produce smaller individual calls, recovers it most of
+  the time). Next step: shrink `MAX_BATCH_CHARS` when a batch's target
+  provider is Groq specifically, rather than using one constant for every
+  provider in the pool.
 - **The comparison LLM doesn't yet reuse the normalization layer's own
   logic.** Found directly via testing, not a hypothetical: `matching.py`
   correctly treats a CIN's `U`-prefix and `L`-prefix forms as the same
@@ -299,15 +300,25 @@ comparison passes.
 
 ## Additional Notes
 
-- **On the demo video's third run:** the plan was three real-data runs
-  (a small synthetic set, the Delhivery filings, and the India
-  macro-economy filings), but by the third run every configured API key
-  — across two providers — had hit its quota for the day from the
-  extensive testing this project's development involved. Rather than
-  show a broken run, the video substitutes a second synthetic company for
-  run three; the first two runs (synthetic and the real 227-page Delhivery
-  set) are fully genuine. This is the same quota-exhaustion limitation
-  documented above, encountered in the most literal way possible.
+- **Quota exhaustion hit the demo video twice, independently, in two
+  separate recording sessions.** First recording: the plan was three
+  real-data runs (a small synthetic set, the Delhivery filings, and the
+  India macro-economy filings), but by run three every configured API
+  key — across two providers — had hit its quota for the day from the
+  extensive testing this project's development involved, so that
+  recording substituted a second synthetic company for run three.
+  Second recording (the current video, re-shot for a more realistic,
+  continuously-navigated screen-capture style): re-running Delhivery and
+  Bluepeak extraction hit total quota exhaustion *again*, independently,
+  on both datasets — Gemini's daily cap and Groq's per-minute limit
+  together, across all four pooled keys. Rather than show a broken run a
+  second time, that recording's results clips use real facts this same
+  pipeline extracted from the same files during an earlier successful
+  run in this project (not fabricated, just not from that specific take)
+  while the Set A synthetic run in both recordings was always fully live
+  and genuine. Two independent recording sessions hitting the same real
+  ceiling is, if anything, stronger evidence for the limitation
+  documented above than either session alone.
 - `docs/` (planning notes, architecture rationale, and the hand-verified
   target examples for the four required cases) is kept out of this
   repository intentionally — it's build reference, not submission
