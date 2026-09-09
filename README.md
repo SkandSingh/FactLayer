@@ -71,8 +71,7 @@ pytest tests/
 
 ## Video Demo
 
-Watch the demo video (~109s, screen recording of the live app — real
-cursor, real clicks, real scrolling, no screenshots stitched together)
+Watch the demo video 
 
 The video is one continuous take per run, cutting between runs:
 
